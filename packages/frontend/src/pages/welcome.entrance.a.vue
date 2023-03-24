@@ -1,7 +1,7 @@
 <template>
 <div v-if="meta" class="rsqzvsbo">
 	<MkFeaturedPhotos class="bg"/>
-	<XTimeline class="tl"/>
+	<!--<XTimeline class="tl"/>-->
 	<div class="shape1"></div>
 	<div class="shape2"></div>
 	<img src="/client-assets/misskey.svg" class="misskey"/>
@@ -36,12 +36,12 @@
 				</div>
 			</div>
 		</div>
-		<div v-if="instance.policies.ltlAvailable" class="tl">
+		<!--<div v-if="instance.policies.ltlAvailable" class="tl">
 			<div class="title">{{ i18n.ts.letsLookAtTimeline }}</div>
 			<div class="body">
 				<MkTimeline src="local"/>
 			</div>
-		</div>
+		</div>-->
 	</div>
 	<div v-if="instances && instances.length > 0" class="federation">
 		<MarqueeText :duration="40">
