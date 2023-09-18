@@ -67,3 +67,6 @@ temp
 
 # VSCode addon
 .favorites.json
+
+# Original Dockerfile
+Dockerfile.org
