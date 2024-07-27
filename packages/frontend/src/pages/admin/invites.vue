@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <MkStickyContainer>
 	<template #header><XHeader :actions="headerActions" :tabs="headerTabs"/></template>
@@ -52,8 +57,9 @@
 <script lang="ts" setup>
 import { computed, ref, shallowRef } from 'vue';
 import XHeader from './_header_.vue';
-import { i18n } from '@/i18n';
-import * as os from '@/os';
+import { i18n } from '@/i18n.js';
+import * as os from '@/os.js';
+import { misskeyApi } from '@/scripts/misskey-api.js';
 import MkButton from '@/components/MkButton.vue';
 import MkFolder from '@/components/MkFolder.vue';
 import MkSelect from '@/components/MkSelect.vue';
@@ -61,12 +67,12 @@ import MkInput from '@/components/MkInput.vue';
 import MkSwitch from '@/components/MkSwitch.vue';
 import MkPagination, { Paging } from '@/components/MkPagination.vue';
 import MkInviteCode from '@/components/MkInviteCode.vue';
-import { definePageMetadata } from '@/scripts/page-metadata';
+import { definePageMetadata } from '@/scripts/page-metadata.js';
 
 const pagingComponent = shallowRef<InstanceType<typeof MkPagination>>();
 
-let type = ref('all');
-let sort = ref('+createdAt');
+const type = ref('all');
+const sort = ref('+createdAt');
 
 const pagination: Paging = {
 	endpoint: 'admin/invite/list' as const,
@@ -88,14 +94,14 @@ async function createWithOptions() {
 		count: createCount.value,
 	};
 
-	const tickets = await os.api('admin/invite/create', options);
+	const tickets = await misskeyApi('admin/invite/create', options);
 	os.alert({
 		type: 'success',
 		title: i18n.ts.inviteCodeCreated,
-		text: tickets?.map(x => x.code).join('\n'),
+		text: tickets.map(x => x.code).join('\n'),
 	});
 
-	tickets?.forEach(ticket => pagingComponent.value?.prepend(ticket));
+	tickets.forEach(ticket => pagingComponent.value?.prepend(ticket));
 }
 
 function deleted(id: string) {
@@ -104,13 +110,13 @@ function deleted(id: string) {
 	}
 }
 
-const headerActions = $computed(() => []);
-const headerTabs = $computed(() => []);
+const headerActions = computed(() => []);
+const headerTabs = computed(() => []);
 
-definePageMetadata({
+definePageMetadata(() => ({
 	title: i18n.ts.invite,
 	icon: 'ti ti-user-plus',
-});
+}));
 </script>
 
 <style lang="scss" module>

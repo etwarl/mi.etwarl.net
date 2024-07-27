@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <button class="_button" :class="$style.root" @click="menu">
 	<img :src="emoji.url" :class="$style.img" loading="lazy"/>
@@ -9,18 +14,15 @@
 </template>
 
 <script lang="ts" setup>
-import { } from 'vue';
-import * as os from '@/os';
-import copyToClipboard from '@/scripts/copy-to-clipboard';
-import { i18n } from '@/i18n';
+import * as os from '@/os.js';
+import * as Misskey from 'misskey-js';
+import { misskeyApiGet } from '@/scripts/misskey-api.js';
+import copyToClipboard from '@/scripts/copy-to-clipboard.js';
+import { i18n } from '@/i18n.js';
+import MkCustomEmojiDetailedDialog from '@/components/MkCustomEmojiDetailedDialog.vue';
 
 const props = defineProps<{
-	emoji: {
-		name: string;
-		aliases: string[];
-		category: string;
-		url: string;
-	};
+  emoji: Misskey.entities.EmojiSimple;
 }>();
 
 function menu(ev) {
@@ -37,12 +39,13 @@ function menu(ev) {
 	}, {
 		text: i18n.ts.info,
 		icon: 'ti ti-info-circle',
-		action: () => {
-			os.apiGet('emoji', { name: props.emoji.name }).then(res => {
-				os.alert({
-					type: 'info',
-					text: `License: ${res.license}`,
-				});
+		action: async () => {
+			os.popup(MkCustomEmojiDetailedDialog, {
+				emoji: await misskeyApiGet('emoji', {
+					name: props.emoji.name,
+				})
+			}, {
+				anchor: ev.target,
 			});
 		},
 	}], ev.currentTarget ?? ev.target);

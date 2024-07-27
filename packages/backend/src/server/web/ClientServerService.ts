@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +19,7 @@ import fastifyView from '@fastify/view';
 import fastifyCookie from '@fastify/cookie';
 import fastifyProxy from '@fastify/http-proxy';
 import vary from 'vary';
+import htmlSafeJsonStringify from 'htmlescape';
 import type { Config } from '@/config.js';
 import { getNoteSummary } from '@/misc/get-note-summary.js';
 import { DI } from '@/di-symbols.js';
@@ -23,16 +29,17 @@ import type { DbQueue, DeliverQueue, EndedPollNotificationQueue, InboxQueue, Obj
 import { UserEntityService } from '@/core/entities/UserEntityService.js';
 import { NoteEntityService } from '@/core/entities/NoteEntityService.js';
 import { PageEntityService } from '@/core/entities/PageEntityService.js';
+import { MetaEntityService } from '@/core/entities/MetaEntityService.js';
 import { GalleryPostEntityService } from '@/core/entities/GalleryPostEntityService.js';
 import { ClipEntityService } from '@/core/entities/ClipEntityService.js';
 import { ChannelEntityService } from '@/core/entities/ChannelEntityService.js';
-import type { ChannelsRepository, ClipsRepository, FlashsRepository, GalleryPostsRepository, Meta, NotesRepository, PagesRepository, UserProfilesRepository, UsersRepository } from '@/models/index.js';
+import type { ChannelsRepository, ClipsRepository, FlashsRepository, GalleryPostsRepository, MiMeta, NotesRepository, PagesRepository, ReversiGamesRepository, UserProfilesRepository, UsersRepository } from '@/models/_.js';
 import type Logger from '@/logger.js';
-import { deepClone } from '@/misc/clone.js';
+import { handleRequestRedirectToOmitSearch } from '@/misc/fastify-hook-handlers.js';
 import { bindThis } from '@/decorators.js';
 import { FlashEntityService } from '@/core/entities/FlashEntityService.js';
 import { RoleService } from '@/core/RoleService.js';
-import manifest from './manifest.json' assert { type: 'json' };
+import { ReversiGameEntityService } from '@/core/entities/ReversiGameEntityService.js';
 import { FeedService } from './FeedService.js';
 import { UrlPreviewService } from './UrlPreviewService.js';
 import { ClientLoggerService } from './ClientLoggerService.js';
@@ -46,6 +53,7 @@ const clientAssets = `${_dirname}/../../../../frontend/assets/`;
 const assets = `${_dirname}/../../../../../built/_frontend_dist_/`;
 const swAssets = `${_dirname}/../../../../../built/_sw_dist_/`;
 const viteOut = `${_dirname}/../../../../../built/_vite_/`;
+const tarball = `${_dirname}/../../../../../built/tarball/`;
 
 @Injectable()
 export class ClientServerService {
@@ -79,13 +87,18 @@ export class ClientServerService {
 		@Inject(DI.flashsRepository)
 		private flashsRepository: FlashsRepository,
 
+		@Inject(DI.reversiGamesRepository)
+		private reversiGamesRepository: ReversiGamesRepository,
+
 		private flashEntityService: FlashEntityService,
 		private userEntityService: UserEntityService,
 		private noteEntityService: NoteEntityService,
 		private pageEntityService: PageEntityService,
+		private metaEntityService: MetaEntityService,
 		private galleryPostEntityService: GalleryPostEntityService,
 		private clipEntityService: ClipEntityService,
 		private channelEntityService: ChannelEntityService,
+		private reversiGameEntityService: ReversiGameEntityService,
 		private metaService: MetaService,
 		private urlPreviewService: UrlPreviewService,
 		private feedService: FeedService,
@@ -105,27 +118,75 @@ export class ClientServerService {
 
 	@bindThis
 	private async manifestHandler(reply: FastifyReply) {
-		const res = deepClone(manifest);
-
 		const instance = await this.metaService.fetch(true);
 
-		res.short_name = instance.name ?? 'Misskey';
-		res.name = instance.name ?? 'Misskey';
-		if (instance.themeColor) res.theme_color = instance.themeColor;
+		let manifest = {
+			// 空文字列の場合右辺を使いたいため
+			// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+			'short_name': instance.shortName || instance.name || this.config.host,
+			// 空文字列の場合右辺を使いたいため
+			// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+			'name': instance.name || this.config.host,
+			'start_url': '/',
+			'display': 'standalone',
+			'background_color': '#313a42',
+			// 空文字列の場合右辺を使いたいため
+			// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+			'theme_color': instance.themeColor || '#86b300',
+			'icons': [{
+				// 空文字列の場合右辺を使いたいため
+				// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+				'src': instance.app192IconUrl || '/static-assets/icons/192.png',
+				'sizes': '192x192',
+				'type': 'image/png',
+				'purpose': 'maskable',
+			}, {
+				// 空文字列の場合右辺を使いたいため
+				// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+				'src': instance.app512IconUrl || '/static-assets/icons/512.png',
+				'sizes': '512x512',
+				'type': 'image/png',
+				'purpose': 'maskable',
+			}, {
+				'src': '/static-assets/splash.png',
+				'sizes': '300x300',
+				'type': 'image/png',
+				'purpose': 'any',
+			}],
+			'share_target': {
+				'action': '/share/',
+				'method': 'GET',
+				'enctype': 'application/x-www-form-urlencoded',
+				'params': {
+					'title': 'title',
+					'text': 'text',
+					'url': 'url',
+				},
+			},
+		};
+
+		manifest = {
+			...manifest,
+			...JSON.parse(instance.manifestJsonOverride === '' ? '{}' : instance.manifestJsonOverride),
+		};
 
 		reply.header('Cache-Control', 'max-age=300');
-		return (res);
+		return (manifest);
 	}
 
 	@bindThis
-	private generateCommonPugData(meta: Meta) {
+	private async generateCommonPugData(meta: MiMeta) {
 		return {
 			instanceName: meta.name ?? 'Misskey',
 			icon: meta.iconUrl,
+			appleTouchIcon: meta.app512IconUrl,
 			themeColor: meta.themeColor,
 			serverErrorImageUrl: meta.serverErrorImageUrl ?? 'https://xn--931a.moe/assets/error.jpg',
 			infoImageUrl: meta.infoImageUrl ?? 'https://xn--931a.moe/assets/info.jpg',
 			notFoundImageUrl: meta.notFoundImageUrl ?? 'https://xn--931a.moe/assets/not-found.jpg',
+			instanceUrl: this.config.url,
+			metaJson: htmlSafeJsonStringify(await this.metaEntityService.packDetailed(meta)),
+			now: Date.now(),
 		};
 	}
 
@@ -138,21 +199,32 @@ export class ClientServerService {
 
 		// Authenticate
 		fastify.addHook('onRequest', async (request, reply) => {
-			if (request.url === bullBoardPath || request.url.startsWith(bullBoardPath + '/')) {
+			if (request.routeOptions.url == null) {
+				reply.code(404).send('Not found');
+				return;
+			}
+
+			// %71ueueとかでリクエストされたら困るため
+			const url = decodeURI(request.routeOptions.url);
+			if (url === bullBoardPath || url.startsWith(bullBoardPath + '/')) {
+				if (!url.startsWith(bullBoardPath + '/static/')) {
+					reply.header('Cache-Control', 'private, max-age=0, must-revalidate');
+				}
+
 				const token = request.cookies.token;
 				if (token == null) {
-					reply.code(401);
-					throw new Error('login required');
+					reply.code(401).send('Login required');
+					return;
 				}
 				const user = await this.usersRepository.findOneBy({ token });
 				if (user == null) {
-					reply.code(403);
-					throw new Error('no such user');
+					reply.code(403).send('No such user');
+					return;
 				}
 				const isAdministrator = await this.roleService.isAdministrator(user);
 				if (!isAdministrator) {
-					reply.code(403);
-					throw new Error('access denied');
+					reply.code(403).send('Access denied');
+					return;
 				}
 			}
 		});
@@ -195,15 +267,21 @@ export class ClientServerService {
 
 		//#region vite assets
 		if (this.config.clientManifestExists) {
-			fastify.register(fastifyStatic, {
-				root: viteOut,
-				prefix: '/vite/',
-				maxAge: ms('30 days'),
-				decorateReply: false,
+			fastify.register((fastify, options, done) => {
+				fastify.register(fastifyStatic, {
+					root: viteOut,
+					prefix: '/vite/',
+					maxAge: ms('30 days'),
+					immutable: true,
+					decorateReply: false,
+				});
+				fastify.addHook('onRequest', handleRequestRedirectToOmitSearch);
+				done();
 			});
 		} else {
+			const port = (process.env.VITE_PORT ?? '5173');
 			fastify.register(fastifyProxy, {
-				upstream: 'http://localhost:5173', // TODO: port configuration
+				upstream: 'http://localhost:' + port,
 				prefix: '/vite',
 				rewritePrefix: '/vite',
 			});
@@ -231,6 +309,18 @@ export class ClientServerService {
 			prefix: '/assets/',
 			maxAge: ms('7 days'),
 			decorateReply: false,
+		});
+
+		fastify.register((fastify, options, done) => {
+			fastify.register(fastifyStatic, {
+				root: tarball,
+				prefix: '/tarball/',
+				maxAge: ms('30 days'),
+				immutable: true,
+				decorateReply: false,
+			});
+			fastify.addHook('onRequest', handleRequestRedirectToOmitSearch);
+			done();
 		});
 
 		fastify.get('/favicon.ico', async (request, reply) => {
@@ -348,7 +438,7 @@ export class ClientServerService {
 
 		//#endregion
 
-		const renderBase = async (reply: FastifyReply) => {
+		const renderBase = async (reply: FastifyReply, data: { [key: string]: any } = {}) => {
 			const meta = await this.metaService.fetch();
 			reply.header('Cache-Control', 'public, max-age=30');
 			return await reply.view('base', {
@@ -356,7 +446,8 @@ export class ClientServerService {
 				url: this.config.url,
 				title: meta.name ?? 'Misskey',
 				desc: meta.description,
-				...this.generateCommonPugData(meta),
+				...await this.generateCommonPugData(meta),
+				...data,
 			});
 		};
 
@@ -375,7 +466,9 @@ export class ClientServerService {
 		};
 
 		// Atom
-		fastify.get<{ Params: { user: string; } }>('/@:user.atom', async (request, reply) => {
+		fastify.get<{ Params: { user?: string; } }>('/@:user.atom', async (request, reply) => {
+			if (request.params.user == null) return await renderBase(reply);
+
 			const feed = await getFeed(request.params.user);
 
 			if (feed) {
@@ -388,7 +481,9 @@ export class ClientServerService {
 		});
 
 		// RSS
-		fastify.get<{ Params: { user: string; } }>('/@:user.rss', async (request, reply) => {
+		fastify.get<{ Params: { user?: string; } }>('/@:user.rss', async (request, reply) => {
+			if (request.params.user == null) return await renderBase(reply);
+
 			const feed = await getFeed(request.params.user);
 
 			if (feed) {
@@ -401,7 +496,9 @@ export class ClientServerService {
 		});
 
 		// JSON
-		fastify.get<{ Params: { user: string; } }>('/@:user.json', async (request, reply) => {
+		fastify.get<{ Params: { user?: string; } }>('/@:user.json', async (request, reply) => {
+			if (request.params.user == null) return await renderBase(reply);
+
 			const feed = await getFeed(request.params.user);
 
 			if (feed) {
@@ -423,6 +520,8 @@ export class ClientServerService {
 				isSuspended: false,
 			});
 
+			vary(reply.raw, 'Accept');
+
 			if (user != null) {
 				const profile = await this.userProfilesRepository.findOneByOrFail({ userId: user.id });
 				const meta = await this.metaService.fetch();
@@ -441,7 +540,7 @@ export class ClientServerService {
 					user, profile, me,
 					avatarUrl: user.avatarUrl ?? this.userEntityService.getIdenticonUrl(user),
 					sub: request.params.sub,
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				// リモートユーザーなので
@@ -461,6 +560,8 @@ export class ClientServerService {
 				reply.code(404);
 				return;
 			}
+
+			vary(reply.raw, 'Accept');
 
 			reply.redirect(`/@${user.username}${ user.host == null ? '' : '@' + user.host}`);
 		});
@@ -489,7 +590,7 @@ export class ClientServerService {
 					avatarUrl: _note.user.avatarUrl,
 					// TODO: Let locale changeable by instance setting
 					summary: getNoteSummary(_note),
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				return await renderBase(reply);
@@ -528,7 +629,7 @@ export class ClientServerService {
 					page: _page,
 					profile,
 					avatarUrl: _page.user.avatarUrl,
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				return await renderBase(reply);
@@ -554,7 +655,7 @@ export class ClientServerService {
 					flash: _flash,
 					profile,
 					avatarUrl: _flash.user.avatarUrl,
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				return await renderBase(reply);
@@ -580,7 +681,7 @@ export class ClientServerService {
 					clip: _clip,
 					profile,
 					avatarUrl: _clip.user.avatarUrl,
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				return await renderBase(reply);
@@ -604,7 +705,7 @@ export class ClientServerService {
 					post: _post,
 					profile,
 					avatarUrl: _post.user.avatarUrl,
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				return await renderBase(reply);
@@ -623,13 +724,44 @@ export class ClientServerService {
 				reply.header('Cache-Control', 'public, max-age=15');
 				return await reply.view('channel', {
 					channel: _channel,
-					...this.generateCommonPugData(meta),
+					...await this.generateCommonPugData(meta),
+				});
+			} else {
+				return await renderBase(reply);
+			}
+		});
+
+		// Reversi game
+		fastify.get<{ Params: { game: string; } }>('/reversi/g/:game', async (request, reply) => {
+			const game = await this.reversiGamesRepository.findOneBy({
+				id: request.params.game,
+			});
+
+			if (game) {
+				const _game = await this.reversiGameEntityService.packDetail(game);
+				const meta = await this.metaService.fetch();
+				reply.header('Cache-Control', 'public, max-age=3600');
+				return await reply.view('reversi-game', {
+					game: _game,
+					...await this.generateCommonPugData(meta),
 				});
 			} else {
 				return await renderBase(reply);
 			}
 		});
 		//#endregion
+
+		//region noindex pages
+		// Tags
+		fastify.get<{ Params: { clip: string; } }>('/tags/:tag', async (request, reply) => {
+			return await renderBase(reply, { noindex: true });
+		});
+
+		// User with Tags
+		fastify.get<{ Params: { clip: string; } }>('/user-tags/:tag', async (request, reply) => {
+			return await renderBase(reply, { noindex: true });
+		});
+		//endregion
 
 		fastify.get('/_info_card_', async (request, reply) => {
 			const meta = await this.metaService.fetch(true);
@@ -677,8 +809,8 @@ export class ClientServerService {
 
 		fastify.setErrorHandler(async (error, request, reply) => {
 			const errId = randomUUID();
-			this.clientLoggerService.logger.error(`Internal error occured in ${request.routerPath}: ${error.message}`, {
-				path: request.routerPath,
+			this.clientLoggerService.logger.error(`Internal error occurred in ${request.routeOptions.url}: ${error.message}`, {
+				path: request.routeOptions.url,
 				params: request.params,
 				query: request.query,
 				code: error.name,

@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 export class RemoveShowTimelineReplies1684206886988 {
     name = 'RemoveShowTimelineReplies1684206886988'
 

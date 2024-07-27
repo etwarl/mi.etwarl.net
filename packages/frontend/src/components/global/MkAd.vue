@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <div v-if="chosen && !shouldHide" :class="$style.root">
 	<div
@@ -9,10 +14,20 @@
 			[$style.form_vertical]: chosen.place === 'vertical',
 		}]"
 	>
-		<a :href="chosen.url" target="_blank" :class="$style.link">
+		<component
+			:is="self ? 'MkA' : 'a'"
+			:class="$style.link"
+			v-bind="self ? {
+				to: chosen.url.substring(local.length),
+			} : {
+				href: chosen.url,
+				rel: 'nofollow noopener',
+				target: '_blank',
+			}"
+		>
 			<img :src="chosen.imageUrl" :class="$style.img">
 			<button class="_button" :class="$style.i" @click.prevent.stop="toggleMenu"><i :class="$style.iIcon" class="ti ti-info-circle"></i></button>
-		</a>
+		</component>
 	</div>
 	<div v-else :class="$style.menu">
 		<div :class="$style.menuContainer">
@@ -27,14 +42,14 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
-import { i18n } from '@/i18n';
-import { instance } from '@/instance';
-import { host } from '@/config';
+import { ref, computed } from 'vue';
+import { i18n } from '@/i18n.js';
+import { instance } from '@/instance.js';
+import { url as local, host } from '@/config.js';
 import MkButton from '@/components/MkButton.vue';
-import { defaultStore } from '@/store';
-import * as os from '@/os';
-import { $i } from '@/account';
+import { defaultStore } from '@/store.js';
+import * as os from '@/os.js';
+import { $i } from '@/account.js';
 
 type Ad = (typeof instance)['ads'][number];
 
@@ -91,7 +106,10 @@ const choseAd = (): Ad | null => {
 };
 
 const chosen = ref(choseAd());
-const shouldHide = $ref(!defaultStore.state.forceShowAds && $i && $i.policies.canHideAds && (props.specify == null));
+
+const self = computed(() => chosen.value?.url.startsWith(local));
+
+const shouldHide = ref(!defaultStore.state.forceShowAds && $i && $i.policies.canHideAds && (props.specify == null));
 
 function reduceFrequency(): void {
 	if (chosen.value == null) return;

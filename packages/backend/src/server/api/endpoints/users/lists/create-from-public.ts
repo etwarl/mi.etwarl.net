@@ -1,7 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { Inject, Injectable } from '@nestjs/common';
-import type { UserListsRepository, UserListJoiningsRepository, BlockingsRepository } from '@/models/index.js';
+import type { UserListsRepository, UserListMembershipsRepository, BlockingsRepository } from '@/models/_.js';
 import { IdService } from '@/core/IdService.js';
-import type { UserList } from '@/models/entities/UserList.js';
+import type { MiUserList } from '@/models/UserList.js';
 import { Endpoint } from '@/server/api/endpoint-base.js';
 import { GetterService } from '@/server/api/GetterService.js';
 import { UserListEntityService } from '@/core/entities/UserListEntityService.js';
@@ -13,6 +18,7 @@ import { UserListService } from '@/core/UserListService.js';
 export const meta = {
 	requireCredential: true,
 	prohibitMoved: true,
+	kind: 'write:account',
 	res: {
 		type: 'object',
 		optional: false, nullable: false,
@@ -66,13 +72,13 @@ export const paramDef = {
 } as const;
 
 @Injectable()
-export default class extends Endpoint<typeof meta, typeof paramDef> {
+export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-disable-line import/no-default-export
 	constructor(
 		@Inject(DI.userListsRepository)
 		private userListsRepository: UserListsRepository,
 
-		@Inject(DI.userListJoiningsRepository)
-		private userListJoiningsRepository: UserListJoiningsRepository,
+		@Inject(DI.userListMembershipsRepository)
+		private userListMembershipsRepository: UserListMembershipsRepository,
 
 		@Inject(DI.blockingsRepository)
 		private blockingsRepository: BlockingsRepository,
@@ -84,7 +90,7 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 		private roleService: RoleService,
 	) {
 		super(meta, paramDef, async (ps, me) => {
-			const listExist = await this.userListsRepository.exist({
+			const listExist = await this.userListsRepository.exists({
 				where: {
 					id: ps.listId,
 					isPublic: true,
@@ -98,14 +104,13 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 				throw new ApiError(meta.errors.tooManyUserLists);
 			}
 
-			const userList = await this.userListsRepository.insert({
-				id: this.idService.genId(),
-				createdAt: new Date(),
+			const userList = await this.userListsRepository.insertOne({
+				id: this.idService.gen(),
 				userId: me.id,
 				name: ps.name,
-			} as UserList).then(x => this.userListsRepository.findOneByOrFail(x.identifiers[0]));
+			} as MiUserList);
 
-			const users = (await this.userListJoiningsRepository.findBy({
+			const users = (await this.userListMembershipsRepository.findBy({
 				userListId: ps.listId,
 			})).map(x => x.userId);
 
@@ -116,7 +121,7 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 				});
 
 				if (currentUser.id !== me.id) {
-					const blockExist = await this.blockingsRepository.exist({
+					const blockExist = await this.blockingsRepository.exists({
 						where: {
 							blockerId: currentUser.id,
 							blockeeId: me.id,
@@ -127,7 +132,7 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 					}
 				}
 
-				const exist = await this.userListJoiningsRepository.exist({
+				const exist = await this.userListMembershipsRepository.exists({
 					where: {
 						userListId: userList.id,
 						userId: currentUser.id,
@@ -139,7 +144,7 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 				}
 
 				try {
-					await this.userListService.push(currentUser, userList, me);
+					await this.userListService.addMember(currentUser, userList, me);
 				} catch (err) {
 					if (err instanceof UserListService.TooManyUsersError) {
 						throw new ApiError(meta.errors.tooManyUsers);

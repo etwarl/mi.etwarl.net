@@ -1,12 +1,17 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import rename from 'rename';
 import sharp from 'sharp';
-import { sharpBmp } from 'sharp-read-bmp';
+import { sharpBmp } from '@misskey-dev/sharp-read-bmp';
 import type { Config } from '@/config.js';
-import type { DriveFile, DriveFilesRepository } from '@/models/index.js';
+import type { MiDriveFile, DriveFilesRepository } from '@/models/_.js';
 import { DI } from '@/di-symbols.js';
 import { createTemp } from '@/misc/create-temp.js';
 import { FILE_TYPE_BROWSERSAFE } from '@/const.js';
@@ -22,6 +27,7 @@ import { LoggerService } from '@/core/LoggerService.js';
 import { bindThis } from '@/decorators.js';
 import { isMimeImage } from '@/misc/is-mime-image.js';
 import { correctFilename } from '@/misc/correct-filename.js';
+import { handleRequestRedirectToOmitSearch } from '@/misc/fastify-hook-handlers.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply, FastifyPluginOptions } from 'fastify';
 
 const _filename = fileURLToPath(import.meta.url);
@@ -56,23 +62,29 @@ export class FileServerService {
 	public createServer(fastify: FastifyInstance, options: FastifyPluginOptions, done: (err?: Error) => void) {
 		fastify.addHook('onRequest', (request, reply, done) => {
 			reply.header('Content-Security-Policy', 'default-src \'none\'; img-src \'self\'; media-src \'self\'; style-src \'unsafe-inline\'');
+			if (process.env.NODE_ENV === 'development') {
+				reply.header('Access-Control-Allow-Origin', '*');
+			}
 			done();
 		});
 
-		fastify.get('/files/app-default.jpg', (request, reply) => {
-			const file = fs.createReadStream(`${_dirname}/assets/dummy.png`);
-			reply.header('Content-Type', 'image/jpeg');
-			reply.header('Cache-Control', 'max-age=31536000, immutable');
-			return reply.send(file);
-		});
+		fastify.register((fastify, options, done) => {
+			fastify.addHook('onRequest', handleRequestRedirectToOmitSearch);
+			fastify.get('/files/app-default.jpg', (request, reply) => {
+				const file = fs.createReadStream(`${_dirname}/assets/dummy.png`);
+				reply.header('Content-Type', 'image/jpeg');
+				reply.header('Cache-Control', 'max-age=31536000, immutable');
+				return reply.send(file);
+			});
 
-		fastify.get<{ Params: { key: string; } }>('/files/:key', async (request, reply) => {
-			return await this.sendDriveFile(request, reply)
-				.catch(err => this.errorHandler(request, reply, err));
-		});
-		fastify.get<{ Params: { key: string; } }>('/files/:key/*', async (request, reply) => {
-			return await this.sendDriveFile(request, reply)
-				.catch(err => this.errorHandler(request, reply, err));
+			fastify.get<{ Params: { key: string; } }>('/files/:key', async (request, reply) => {
+				return await this.sendDriveFile(request, reply)
+					.catch(err => this.errorHandler(request, reply, err));
+			});
+			fastify.get<{ Params: { key: string; } }>('/files/:key/*', async (request, reply) => {
+				return await reply.redirect(301, `${this.config.url}/files/${request.params.key}`);
+			});
+			done();
 		});
 
 		fastify.get<{
@@ -160,11 +172,36 @@ export class FileServerService {
 				}
 
 				if (!image) {
-					image = {
-						data: fs.createReadStream(file.path),
-						ext: file.ext,
-						type: file.mime,
-					};
+					if (request.headers.range && file.file.size > 0) {
+						const range = request.headers.range as string;
+						const parts = range.replace(/bytes=/, '').split('-');
+						const start = parseInt(parts[0], 10);
+						let end = parts[1] ? parseInt(parts[1], 10) : file.file.size - 1;
+						if (end > file.file.size) {
+							end = file.file.size - 1;
+						}
+						const chunksize = end - start + 1;
+
+						image = {
+							data: fs.createReadStream(file.path, {
+								start,
+								end,
+							}),
+							ext: file.ext,
+							type: file.mime,
+						};
+
+						reply.header('Content-Range', `bytes ${start}-${end}/${file.file.size}`);
+						reply.header('Accept-Ranges', 'bytes');
+						reply.header('Content-Length', chunksize);
+						reply.code(206);
+					} else {
+						image = {
+							data: fs.createReadStream(file.path),
+							ext: file.ext,
+							type: file.mime,
+						};
+					}
 				}
 
 				if ('pipe' in image.data && typeof image.data.pipe === 'function') {
@@ -177,6 +214,8 @@ export class FileServerService {
 				}
 
 				reply.header('Content-Type', FILE_TYPE_BROWSERSAFE.includes(image.type) ? image.type : 'application/octet-stream');
+				reply.header('Content-Length', file.file.size);
+				reply.header('Cache-Control', 'max-age=31536000, immutable');
 				reply.header('Content-Disposition',
 					contentDisposition(
 						'inline',
@@ -195,11 +234,54 @@ export class FileServerService {
 				reply.header('Content-Type', FILE_TYPE_BROWSERSAFE.includes(file.mime) ? file.mime : 'application/octet-stream');
 				reply.header('Cache-Control', 'max-age=31536000, immutable');
 				reply.header('Content-Disposition', contentDisposition('inline', filename));
+
+				if (request.headers.range && file.file.size > 0) {
+					const range = request.headers.range as string;
+					const parts = range.replace(/bytes=/, '').split('-');
+					const start = parseInt(parts[0], 10);
+					let end = parts[1] ? parseInt(parts[1], 10) : file.file.size - 1;
+					if (end > file.file.size) {
+						end = file.file.size - 1;
+					}
+					const chunksize = end - start + 1;
+					const fileStream = fs.createReadStream(file.path, {
+						start,
+						end,
+					});
+					reply.header('Content-Range', `bytes ${start}-${end}/${file.file.size}`);
+					reply.header('Accept-Ranges', 'bytes');
+					reply.header('Content-Length', chunksize);
+					reply.code(206);
+					return fileStream;
+				}
+
 				return fs.createReadStream(file.path);
 			} else {
 				reply.header('Content-Type', FILE_TYPE_BROWSERSAFE.includes(file.file.type) ? file.file.type : 'application/octet-stream');
+				reply.header('Content-Length', file.file.size);
 				reply.header('Cache-Control', 'max-age=31536000, immutable');
 				reply.header('Content-Disposition', contentDisposition('inline', file.filename));
+
+				if (request.headers.range && file.file.size > 0) {
+					const range = request.headers.range as string;
+					const parts = range.replace(/bytes=/, '').split('-');
+					const start = parseInt(parts[0], 10);
+					let end = parts[1] ? parseInt(parts[1], 10) : file.file.size - 1;
+					if (end > file.file.size) {
+						end = file.file.size - 1;
+					}
+					const chunksize = end - start + 1;
+					const fileStream = fs.createReadStream(file.path, {
+						start,
+						end,
+					});
+					reply.header('Content-Range', `bytes ${start}-${end}/${file.file.size}`);
+					reply.header('Accept-Ranges', 'bytes');
+					reply.header('Content-Length', chunksize);
+					reply.code(206);
+					return fileStream;
+				}
+
 				return fs.createReadStream(file.path);
 			}
 		} catch (e) {
@@ -332,11 +414,36 @@ export class FileServerService {
 			}
 
 			if (!image) {
-				image = {
-					data: fs.createReadStream(file.path),
-					ext: file.ext,
-					type: file.mime,
-				};
+				if (request.headers.range && file.file && file.file.size > 0) {
+					const range = request.headers.range as string;
+					const parts = range.replace(/bytes=/, '').split('-');
+					const start = parseInt(parts[0], 10);
+					let end = parts[1] ? parseInt(parts[1], 10) : file.file.size - 1;
+					if (end > file.file.size) {
+						end = file.file.size - 1;
+					}
+					const chunksize = end - start + 1;
+
+					image = {
+						data: fs.createReadStream(file.path, {
+							start,
+							end,
+						}),
+						ext: file.ext,
+						type: file.mime,
+					};
+
+					reply.header('Content-Range', `bytes ${start}-${end}/${file.file.size}`);
+					reply.header('Accept-Ranges', 'bytes');
+					reply.header('Content-Length', chunksize);
+					reply.code(206);
+				} else {
+					image = {
+						data: fs.createReadStream(file.path),
+						ext: file.ext,
+						type: file.mime,
+					};
+				}
 			}
 
 			if ('cleanup' in file) {
@@ -367,8 +474,8 @@ export class FileServerService {
 
 	@bindThis
 	private async getStreamAndTypeFromUrl(url: string): Promise<
-		{ state: 'remote'; fileRole?: 'thumbnail' | 'webpublic' | 'original'; file?: DriveFile; mime: string; ext: string | null; path: string; cleanup: () => void; filename: string; }
-		| { state: 'stored_internal'; fileRole: 'thumbnail' | 'webpublic' | 'original'; file: DriveFile; filename: string; mime: string; ext: string | null; path: string; }
+		{ state: 'remote'; fileRole?: 'thumbnail' | 'webpublic' | 'original'; file?: MiDriveFile; mime: string; ext: string | null; path: string; cleanup: () => void; filename: string; }
+		| { state: 'stored_internal'; fileRole: 'thumbnail' | 'webpublic' | 'original'; file: MiDriveFile; filename: string; mime: string; ext: string | null; path: string; }
 		| '404'
 		| '204'
 	> {
@@ -406,8 +513,8 @@ export class FileServerService {
 
 	@bindThis
 	private async getFileFromKey(key: string): Promise<
-		{ state: 'remote'; fileRole: 'thumbnail' | 'webpublic' | 'original'; file: DriveFile; filename: string; url: string; mime: string; ext: string | null; path: string; cleanup: () => void; }
-		| { state: 'stored_internal'; fileRole: 'thumbnail' | 'webpublic' | 'original'; file: DriveFile; filename: string; mime: string; ext: string | null; path: string; }
+		{ state: 'remote'; fileRole: 'thumbnail' | 'webpublic' | 'original'; file: MiDriveFile; filename: string; url: string; mime: string; ext: string | null; path: string; cleanup: () => void; }
+		| { state: 'stored_internal'; fileRole: 'thumbnail' | 'webpublic' | 'original'; file: MiDriveFile; filename: string; mime: string; ext: string | null; path: string; }
 		| '404'
 		| '204'
 	> {
@@ -426,6 +533,7 @@ export class FileServerService {
 		if (!file.storedInternal) {
 			if (!(file.isLink && file.uri)) return '204';
 			const result = await this.downloadAndDetectTypeFromUrl(file.uri);
+			file.size = (await fs.promises.stat(result.path)).size;	// DB file.sizeは正確とは限らないので
 			return {
 				...result,
 				url: file.uri,

@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 let isWebpSupportedCache: boolean | undefined;
 export function isWebpSupported() {
 	if (isWebpSupportedCache === undefined) {

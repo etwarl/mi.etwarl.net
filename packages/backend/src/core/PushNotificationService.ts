@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import push from 'web-push';
 import * as Redis from 'ioredis';
@@ -5,7 +10,7 @@ import { DI } from '@/di-symbols.js';
 import type { Config } from '@/config.js';
 import type { Packed } from '@/misc/json-schema.js';
 import { getNoteSummary } from '@/misc/get-note-summary.js';
-import type { SwSubscription, SwSubscriptionsRepository } from '@/models/index.js';
+import type { MiSwSubscription, SwSubscriptionsRepository } from '@/models/_.js';
 import { MetaService } from '@/core/MetaService.js';
 import { bindThis } from '@/decorators.js';
 import { RedisKVCache } from '@/misc/cache.js';
@@ -43,7 +48,7 @@ function truncateBody<T extends keyof PushNotificationsTypes>(type: T, body: Pus
 
 @Injectable()
 export class PushNotificationService implements OnApplicationShutdown {
-	private subscriptionsCache: RedisKVCache<SwSubscription[]>;
+	private subscriptionsCache: RedisKVCache<MiSwSubscription[]>;
 
 	constructor(
 		@Inject(DI.config)
@@ -57,7 +62,7 @@ export class PushNotificationService implements OnApplicationShutdown {
 
 		private metaService: MetaService,
 	) {
-		this.subscriptionsCache = new RedisKVCache<SwSubscription[]>(this.redisClient, 'userSwSubscriptions', {
+		this.subscriptionsCache = new RedisKVCache<MiSwSubscription[]>(this.redisClient, 'userSwSubscriptions', {
 			lifetime: 1000 * 60 * 60 * 1, // 1h
 			memoryCacheLifetime: 1000 * 60 * 3, // 3m
 			fetcher: (key) => this.swSubscriptionsRepository.findBy({ userId: key }),
@@ -96,7 +101,7 @@ export class PushNotificationService implements OnApplicationShutdown {
 				type,
 				body: (type === 'notification' || type === 'unreadAntennaNote') ? truncateBody(type, body) : body,
 				userId,
-				dateTime: (new Date()).getTime(),
+				dateTime: Date.now(),
 			}), {
 				proxy: this.config.proxy,
 			}).catch((err: any) => {
@@ -110,10 +115,17 @@ export class PushNotificationService implements OnApplicationShutdown {
 						endpoint: subscription.endpoint,
 						auth: subscription.auth,
 						publickey: subscription.publickey,
+					}).then(() => {
+						this.refreshCache(userId);
 					});
 				}
 			});
 		}
+	}
+
+	@bindThis
+	public refreshCache(userId: string): void {
+		this.subscriptionsCache.refresh(userId);
 	}
 
 	@bindThis

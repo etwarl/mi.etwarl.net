@@ -1,8 +1,13 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { Inject, Injectable } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import { IsNull } from 'typeorm';
 import { DI } from '@/di-symbols.js';
-import type { RegistrationTicketsRepository, UsedUsernamesRepository, UserPendingsRepository, UserProfilesRepository, UsersRepository, RegistrationTicket } from '@/models/index.js';
+import type { RegistrationTicketsRepository, UsedUsernamesRepository, UserPendingsRepository, UserProfilesRepository, UsersRepository, MiRegistrationTicket } from '@/models/_.js';
 import type { Config } from '@/config.js';
 import { MetaService } from '@/core/MetaService.js';
 import { CaptchaService } from '@/core/CaptchaService.js';
@@ -10,7 +15,7 @@ import { IdService } from '@/core/IdService.js';
 import { SignupService } from '@/core/SignupService.js';
 import { UserEntityService } from '@/core/entities/UserEntityService.js';
 import { EmailService } from '@/core/EmailService.js';
-import { LocalUser } from '@/models/entities/User.js';
+import { MiLocalUser } from '@/models/User.js';
 import { FastifyReplyError } from '@/misc/fastify-reply-error.js';
 import { bindThis } from '@/decorators.js';
 import { L_CHARS, secureRndstr } from '@/misc/secure-rndstr.js';
@@ -60,6 +65,7 @@ export class SignupApiService {
 				'hcaptcha-response'?: string;
 				'g-recaptcha-response'?: string;
 				'turnstile-response'?: string;
+				'm-captcha-response'?: string;
 			}
 		}>,
 		reply: FastifyReply,
@@ -73,6 +79,12 @@ export class SignupApiService {
 		if (process.env.NODE_ENV !== 'test') {
 			if (instance.enableHcaptcha && instance.hcaptchaSecretKey) {
 				await this.captchaService.verifyHcaptcha(instance.hcaptchaSecretKey, body['hcaptcha-response']).catch(err => {
+					throw new FastifyReplyError(400, err);
+				});
+			}
+
+			if (instance.enableMcaptcha && instance.mcaptchaSecretKey && instance.mcaptchaSitekey && instance.mcaptchaInstanceUrl) {
+				await this.captchaService.verifyMcaptcha(instance.mcaptchaSecretKey, instance.mcaptchaSitekey, instance.mcaptchaInstanceUrl, body['m-captcha-response']).catch(err => {
 					throw new FastifyReplyError(400, err);
 				});
 			}
@@ -109,7 +121,7 @@ export class SignupApiService {
 			}
 		}
 
-		let ticket: RegistrationTicket | null = null;
+		let ticket: MiRegistrationTicket | null = null;
 
 		if (instance.disableRegistration) {
 			if (invitationCode == null || typeof invitationCode !== 'string') {
@@ -121,7 +133,7 @@ export class SignupApiService {
 				code: invitationCode,
 			});
 
-			if (ticket == null) {
+			if (ticket == null || ticket.usedById != null) {
 				reply.code(400);
 				return;
 			}
@@ -131,19 +143,32 @@ export class SignupApiService {
 				return;
 			}
 
-			if (ticket.usedAt) {
+			// メアド認証が有効の場合
+			if (instance.emailRequiredForSignup) {
+				// メアド認証済みならエラー
+				if (ticket.usedBy) {
+					reply.code(400);
+					return;
+				}
+
+				// 認証しておらず、メール送信から30分以内ならエラー
+				if (ticket.usedAt && ticket.usedAt.getTime() + (1000 * 60 * 30) > Date.now()) {
+					reply.code(400);
+					return;
+				}
+			} else if (ticket.usedAt) {
 				reply.code(400);
 				return;
 			}
 		}
 
 		if (instance.emailRequiredForSignup) {
-			if (await this.usersRepository.exist({ where: { usernameLower: username.toLowerCase(), host: IsNull() } })) {
+			if (await this.usersRepository.exists({ where: { usernameLower: username.toLowerCase(), host: IsNull() } })) {
 				throw new FastifyReplyError(400, 'DUPLICATED_USERNAME');
 			}
 
 			// Check deleted username duplication
-			if (await this.usedUsernamesRepository.exist({ where: { username: username.toLowerCase() } })) {
+			if (await this.usedUsernamesRepository.exists({ where: { username: username.toLowerCase() } })) {
 				throw new FastifyReplyError(400, 'USED_USERNAME');
 			}
 
@@ -158,14 +183,13 @@ export class SignupApiService {
 			const salt = await bcrypt.genSalt(8);
 			const hash = await bcrypt.hash(password, salt);
 
-			const pendingUser = await this.userPendingsRepository.insert({
-				id: this.idService.genId(),
-				createdAt: new Date(),
+			const pendingUser = await this.userPendingsRepository.insertOne({
+				id: this.idService.gen(),
 				code,
 				email: emailAddress!,
 				username: username,
 				password: hash,
-			}).then(x => this.userPendingsRepository.findOneByOrFail(x.identifiers[0]));
+			});
 
 			const link = `${this.config.url}/signup-complete/${code}`;
 
@@ -189,7 +213,7 @@ export class SignupApiService {
 				});
 
 				const res = await this.userEntityService.pack(account, account, {
-					detail: true,
+					schema: 'MeDetailed',
 					includeSecrets: true,
 				});
 
@@ -220,6 +244,10 @@ export class SignupApiService {
 		try {
 			const pendingUser = await this.userPendingsRepository.findOneByOrFail({ code });
 
+			if (this.idService.parse(pendingUser.id).date.getTime() + (1000 * 60 * 30) < Date.now()) {
+				throw new FastifyReplyError(400, 'EXPIRED');
+			}
+
 			const { account, secret } = await this.signupService.signup({
 				username: pendingUser.username,
 				passwordHash: pendingUser.password,
@@ -246,7 +274,7 @@ export class SignupApiService {
 				});
 			}
 
-			return this.signinService.signin(request, reply, account as LocalUser);
+			return this.signinService.signin(request, reply, account as MiLocalUser);
 		} catch (err) {
 			throw new FastifyReplyError(400, typeof err === 'string' ? err : (err as Error).toString());
 		}

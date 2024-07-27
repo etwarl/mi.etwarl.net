@@ -1,11 +1,17 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { URL } from 'node:url';
 import { Inject, Injectable } from '@nestjs/common';
 import * as parse5 from 'parse5';
-import { Window } from 'happy-dom';
+import { Window, XMLSerializer } from 'happy-dom';
 import { DI } from '@/di-symbols.js';
 import type { Config } from '@/config.js';
 import { intersperse } from '@/misc/prelude/array.js';
-import type { IMentionedRemoteUsers } from '@/models/entities/Note.js';
+import { normalizeForSearch } from '@/misc/normalize-for-search.js';
+import type { IMentionedRemoteUsers } from '@/models/Note.js';
 import { bindThis } from '@/decorators.js';
 import * as TreeAdapter from '../../node_modules/parse5/dist/tree-adapters/default.js';
 import type * as mfm from 'mfm-js';
@@ -27,6 +33,8 @@ export class MfmService {
 	public fromHtml(html: string, hashtagNames?: string[]): string {
 		// some AP servers like Pixelfed use br tags as well as newlines
 		html = html.replace(/<br\s?\/?>\r?\n/gi, '\n');
+
+		const normalizedHashtagNames = hashtagNames == null ? undefined : new Set<string>(hashtagNames.map(x => normalizeForSearch(x)));
 
 		const dom = parse5.parseFragment(html);
 
@@ -80,7 +88,7 @@ export class MfmService {
 					const href = node.attrs.find(x => x.name === 'href');
 
 					// ハッシュタグ
-					if (hashtagNames && href && hashtagNames.map(x => x.toLowerCase()).includes(txt.toLowerCase())) {
+					if (normalizedHashtagNames && href && normalizedHashtagNames.has(normalizeForSearch(txt))) {
 						text += txt;
 					// メンション
 					} else if (txt.startsWith('@') && !(rel && rel.value.startsWith('me '))) {
@@ -239,10 +247,18 @@ export class MfmService {
 
 		const doc = window.document;
 
+		const body = doc.createElement('p');
+
 		function appendChildren(children: mfm.MfmNode[], targetElement: any): void {
 			if (children) {
 				for (const child of children.map(x => (handlers as any)[x.type](x))) targetElement.appendChild(child);
 			}
+		}
+
+		function fnDefault(node: mfm.MfmFn) {
+			const el = doc.createElement('i');
+			appendChildren(node.children, el);
+			return el;
 		}
 
 		const handlers: { [K in mfm.MfmNode['type']]: (node: mfm.NodeType<K>) => any } = {
@@ -271,9 +287,69 @@ export class MfmService {
 			},
 
 			fn: (node) => {
-				const el = doc.createElement('i');
-				appendChildren(node.children, el);
-				return el;
+				switch (node.props.name) {
+					case 'unixtime': {
+						const text = node.children[0].type === 'text' ? node.children[0].props.text : '';
+						try {
+							const date = new Date(parseInt(text, 10) * 1000);
+							const el = doc.createElement('time');
+							el.setAttribute('datetime', date.toISOString());
+							el.textContent = date.toISOString();
+							return el;
+						} catch (err) {
+							return fnDefault(node);
+						}
+					}
+
+					case 'ruby': {
+						if (node.children.length === 1) {
+							const child = node.children[0];
+							const text = child.type === 'text' ? child.props.text : '';
+							const rubyEl = doc.createElement('ruby');
+							const rtEl = doc.createElement('rt');
+
+							// ruby未対応のHTMLサニタイザーを通したときにルビが「劉備（りゅうび）」となるようにする
+							const rpStartEl = doc.createElement('rp');
+							rpStartEl.appendChild(doc.createTextNode('('));
+							const rpEndEl = doc.createElement('rp');
+							rpEndEl.appendChild(doc.createTextNode(')'));
+
+							rubyEl.appendChild(doc.createTextNode(text.split(' ')[0]));
+							rtEl.appendChild(doc.createTextNode(text.split(' ')[1]));
+							rubyEl.appendChild(rpStartEl);
+							rubyEl.appendChild(rtEl);
+							rubyEl.appendChild(rpEndEl);
+							return rubyEl;
+						} else {
+							const rt = node.children.at(-1);
+
+							if (!rt) {
+								return fnDefault(node);
+							}
+
+							const text = rt.type === 'text' ? rt.props.text : '';
+							const rubyEl = doc.createElement('ruby');
+							const rtEl = doc.createElement('rt');
+
+							// ruby未対応のHTMLサニタイザーを通したときにルビが「劉備（りゅうび）」となるようにする
+							const rpStartEl = doc.createElement('rp');
+							rpStartEl.appendChild(doc.createTextNode('('));
+							const rpEndEl = doc.createElement('rp');
+							rpEndEl.appendChild(doc.createTextNode(')'));
+
+							appendChildren(node.children.slice(0, node.children.length - 1), rubyEl);
+							rtEl.appendChild(doc.createTextNode(text.trim()));
+							rubyEl.appendChild(rpStartEl);
+							rubyEl.appendChild(rtEl);
+							rubyEl.appendChild(rpEndEl);
+							return rubyEl;
+						}
+					}
+
+					default: {
+						return fnDefault(node);
+					}
+				}
 			},
 
 			blockCode: (node) => {
@@ -348,6 +424,10 @@ export class MfmService {
 			},
 
 			text: (node) => {
+				if (!node.props.text.match(/[\r\n]/)) {
+					return doc.createTextNode(node.props.text);
+				}
+
 				const el = doc.createElement('span');
 				const nodes = node.props.text.split(/\r\n|\r|\n/).map(x => doc.createTextNode(x));
 
@@ -379,8 +459,8 @@ export class MfmService {
 			},
 		};
 
-		appendChildren(nodes, doc.body);
+		appendChildren(nodes, body);
 
-		return `<p>${doc.body.innerHTML}</p>`;
+		return new XMLSerializer().serializeToString(body);
 	}
 }

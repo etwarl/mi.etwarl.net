@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <MkModal ref="modal" :preferType="'dialog'" :zPriority="'high'" @click="success ? done() : () => {}" @closed="emit('closed')">
 	<div :class="[$style.root, { [$style.iconOnly]: (text == null) || success }]">
@@ -27,7 +32,7 @@ const emit = defineEmits<{
 
 function done() {
 	emit('done');
-	modal.value.close();
+	modal.value?.close();
 }
 
 watch(() => props.showing, () => {

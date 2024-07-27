@@ -1,8 +1,13 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { Inject, Injectable } from '@nestjs/common';
 import { DI } from '@/di-symbols.js';
-import type { DriveFilesRepository } from '@/models/index.js';
-import type { RemoteUser } from '@/models/entities/User.js';
-import type { DriveFile } from '@/models/entities/DriveFile.js';
+import type { DriveFilesRepository } from '@/models/_.js';
+import type { MiRemoteUser } from '@/models/User.js';
+import type { MiDriveFile } from '@/models/DriveFile.js';
 import { MetaService } from '@/core/MetaService.js';
 import { truncate } from '@/misc/truncate.js';
 import { DB_MAX_IMAGE_COMMENT_LENGTH } from '@/const.js';
@@ -12,7 +17,7 @@ import { bindThis } from '@/decorators.js';
 import { checkHttps } from '@/misc/check-https.js';
 import { ApResolverService } from '../ApResolverService.js';
 import { ApLoggerService } from '../ApLoggerService.js';
-import type { IObject } from '../type.js';
+import { isDocument, type IObject } from '../type.js';
 
 @Injectable()
 export class ApImageService {
@@ -34,7 +39,7 @@ export class ApImageService {
 	 * Imageを作成します。
 	 */
 	@bindThis
-	public async createImage(actor: RemoteUser, value: string | IObject): Promise<DriveFile> {
+	public async createImage(actor: MiRemoteUser, value: string | IObject): Promise<MiDriveFile | null> {
 		// 投稿者が凍結されていたらスキップ
 		if (actor.isSuspended) {
 			throw new Error('actor has been suspended');
@@ -42,16 +47,18 @@ export class ApImageService {
 
 		const image = await this.apResolverService.createResolver().resolve(value);
 
+		if (!isDocument(image)) return null;
+
 		if (image.url == null) {
-			throw new Error('invalid image: url not provided');
+			return null;
 		}
 
 		if (typeof image.url !== 'string') {
-			throw new Error('invalid image: unexpected type of url: ' + JSON.stringify(image.url, null, 2));
+			return null;
 		}
 
 		if (!checkHttps(image.url)) {
-			throw new Error('invalid image: unexpected schema of url: ' + image.url);
+			return null;
 		}
 
 		this.logger.info(`Creating the Image: ${image.url}`);
@@ -81,12 +88,11 @@ export class ApImageService {
 	/**
 	 * Imageを解決します。
 	 *
-	 * Misskeyに対象のImageが登録されていればそれを返し、そうでなければ
-	 * リモートサーバーからフェッチしてMisskeyに登録しそれを返します。
+	 * ImageをリモートサーバーからフェッチしてMisskeyに登録しそれを返します。
 	 */
 	@bindThis
-	public async resolveImage(actor: RemoteUser, value: string | IObject): Promise<DriveFile> {
-		// TODO
+	public async resolveImage(actor: MiRemoteUser, value: string | IObject): Promise<MiDriveFile | null> {
+		// TODO: Misskeyに対象のImageが登録されていればそれを返す
 
 		// リモートサーバーからフェッチしてきて登録
 		return await this.createImage(actor, value);

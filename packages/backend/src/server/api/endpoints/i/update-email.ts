@@ -1,14 +1,21 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { Inject, Injectable } from '@nestjs/common';
 import ms from 'ms';
 import bcrypt from 'bcryptjs';
 import { Endpoint } from '@/server/api/endpoint-base.js';
-import type { UsersRepository, UserProfilesRepository } from '@/models/index.js';
+import type { UserProfilesRepository } from '@/models/_.js';
 import { UserEntityService } from '@/core/entities/UserEntityService.js';
 import { EmailService } from '@/core/EmailService.js';
 import type { Config } from '@/config.js';
 import { DI } from '@/di-symbols.js';
 import { GlobalEventService } from '@/core/GlobalEventService.js';
 import { L_CHARS, secureRndstr } from '@/misc/secure-rndstr.js';
+import { UserAuthService } from '@/core/UserAuthService.js';
+import { MetaService } from '@/core/MetaService.js';
 import { ApiError } from '../../error.js';
 
 export const meta = {
@@ -33,6 +40,17 @@ export const meta = {
 			code: 'UNAVAILABLE',
 			id: 'a2defefb-f220-8849-0af6-17f816099323',
 		},
+
+		emailRequired: {
+			message: 'Email address is required.',
+			code: 'EMAIL_REQUIRED',
+			id: '324c7a88-59f2-492f-903f-89134f93e47e',
+		},
+	},
+
+	res: {
+		type: 'object',
+		ref: 'MeDetailed',
 	},
 } as const;
 
@@ -41,34 +59,44 @@ export const paramDef = {
 	properties: {
 		password: { type: 'string' },
 		email: { type: 'string', nullable: true },
+		token: { type: 'string', nullable: true },
 	},
 	required: ['password'],
 } as const;
 
-// eslint-disable-next-line import/no-default-export
 @Injectable()
-export default class extends Endpoint<typeof meta, typeof paramDef> {
+export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-disable-line import/no-default-export
 	constructor(
 		@Inject(DI.config)
 		private config: Config,
 
-		@Inject(DI.usersRepository)
-		private usersRepository: UsersRepository,
-
 		@Inject(DI.userProfilesRepository)
 		private userProfilesRepository: UserProfilesRepository,
 
+		private metaService: MetaService,
 		private userEntityService: UserEntityService,
 		private emailService: EmailService,
+		private userAuthService: UserAuthService,
 		private globalEventService: GlobalEventService,
 	) {
 		super(meta, paramDef, async (ps, me) => {
+			const token = ps.token;
 			const profile = await this.userProfilesRepository.findOneByOrFail({ userId: me.id });
 
-			// Compare password
-			const same = await bcrypt.compare(ps.password, profile.password!);
+			if (profile.twoFactorEnabled) {
+				if (token == null) {
+					throw new Error('authentication failed');
+				}
 
-			if (!same) {
+				try {
+					await this.userAuthService.twoFactorAuthenticate(profile, token);
+				} catch (e) {
+					throw new Error('authentication failed');
+				}
+			}
+
+			const passwordMatched = await bcrypt.compare(ps.password, profile.password!);
+			if (!passwordMatched) {
 				throw new ApiError(meta.errors.incorrectPassword);
 			}
 
@@ -77,6 +105,8 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 				if (!res.available) {
 					throw new ApiError(meta.errors.unavailable);
 				}
+			} else if ((await this.metaService.fetch()).emailRequiredForSignup) {
+				throw new ApiError(meta.errors.emailRequired);
 			}
 
 			await this.userProfilesRepository.update(me.id, {
@@ -86,7 +116,7 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 			});
 
 			const iObj = await this.userEntityService.pack(me.id, me, {
-				detail: true,
+				schema: 'MeDetailed',
 				includeSecrets: true,
 			});
 

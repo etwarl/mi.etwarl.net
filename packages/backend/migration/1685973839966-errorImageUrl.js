@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 export class ErrorImageUrl1685973839966 {
     name = 'ErrorImageUrl1685973839966'
 

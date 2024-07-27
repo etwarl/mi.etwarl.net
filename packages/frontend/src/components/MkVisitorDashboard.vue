@@ -1,17 +1,22 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
-<div v-if="meta" :class="$style.root">
+<div v-if="instance" :class="$style.root">
 	<div :class="[$style.main, $style.panel]">
-		<img :src="instance.iconUrl || instance.faviconUrl || '/favicon.ico'" alt="" :class="$style.mainIcon"/>
+		<img :src="instance.iconUrl || '/favicon.ico'" alt="" :class="$style.mainIcon"/>
 		<button class="_button _acrylic" :class="$style.mainMenu" @click="showMenu"><i class="ti ti-dots"></i></button>
 		<div :class="$style.mainFg">
 			<h1 :class="$style.mainTitle">
 				<!-- 背景色によってはロゴが見えなくなるのでとりあえず無効に -->
-				<!-- <img class="logo" v-if="meta.logoImageUrl" :src="meta.logoImageUrl"><span v-else class="text">{{ instanceName }}</span> -->
+				<!-- <img class="logo" v-if="instance.logoImageUrl" :src="instance.logoImageUrl"><span v-else class="text">{{ instanceName }}</span> -->
 				<span>{{ instanceName }}</span>
 			</h1>
 			<div :class="$style.mainAbout">
 				<!-- eslint-disable-next-line vue/no-v-html -->
-				<div v-html="meta.description || i18n.ts.headlineMisskey"></div>
+				<div v-html="instance.description || i18n.ts.headlineMisskey"></div>
 			</div>
 			<div v-if="instance.disableRegistration" :class="$style.mainWarn">
 				<MkInfo warn>{{ i18n.ts.invitationRequiredToRegister }}</MkInfo>
@@ -46,32 +51,26 @@
 </template>
 
 <script lang="ts" setup>
-import { } from 'vue';
-import { Instance } from 'misskey-js/built/entities';
-import XTimeline from './welcome.timeline.vue';
+import { ref } from 'vue';
+import * as Misskey from 'misskey-js';
 import XSigninDialog from '@/components/MkSigninDialog.vue';
 import XSignupDialog from '@/components/MkSignupDialog.vue';
 import MkButton from '@/components/MkButton.vue';
 import MkTimeline from '@/components/MkTimeline.vue';
 import MkInfo from '@/components/MkInfo.vue';
-import { instanceName } from '@/config';
-import * as os from '@/os';
-import { i18n } from '@/i18n';
-import { instance } from '@/instance';
-import number from '@/filters/number';
+import { instanceName } from '@/config.js';
+import * as os from '@/os.js';
+import { misskeyApi } from '@/scripts/misskey-api.js';
+import { i18n } from '@/i18n.js';
+import { instance } from '@/instance.js';
 import MkNumber from '@/components/MkNumber.vue';
 import XActiveUsersChart from '@/components/MkVisitorDashboard.ActiveUsersChart.vue';
+import { openInstanceMenu } from '@/ui/_common_/common';
 
-let meta = $ref<Instance>();
-let stats = $ref(null);
+const stats = ref<Misskey.entities.StatsResponse | null>(null);
 
-os.api('meta', { detail: true }).then(_meta => {
-	meta = _meta;
-});
-
-os.api('stats', {
-}).then((res) => {
-	stats = res;
+misskeyApi('stats', {}).then((res) => {
+	stats.value = res;
 });
 
 function signin() {
@@ -87,30 +86,11 @@ function signup() {
 }
 
 function showMenu(ev) {
-	os.popupMenu([{
-		text: i18n.ts.instanceInfo,
-		icon: 'ti ti-info-circle',
-		action: () => {
-			os.pageWindow('/about');
-		},
-	}, {
-		text: i18n.ts.aboutMisskey,
-		icon: 'ti ti-info-circle',
-		action: () => {
-			os.pageWindow('/about-misskey');
-		},
-	}, null, {
-		text: i18n.ts.help,
-		icon: 'ti ti-help-circle',
-		action: () => {
-			window.open('https://misskey-hub.net/help.md', '_blank');
-		},
-	}], ev.currentTarget ?? ev.target);
+	openInstanceMenu(ev);
 }
 
 function exploreOtherServers() {
-	// TODO: 言語をよしなに
-	window.open('https://join.misskey.page/ja-JP/instances', '_blank');
+	window.open('https://misskey-hub.net/servers/', '_blank', 'noopener');
 }
 </script>
 

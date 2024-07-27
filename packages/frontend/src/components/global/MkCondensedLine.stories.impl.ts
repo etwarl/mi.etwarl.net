@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { StoryObj } from '@storybook/vue3';
 import MkCondensedLine from './MkCondensedLine.vue';
@@ -23,6 +28,7 @@ export const Default = {
 		};
 	},
 	args: {
+		// @ts-expect-error text is for test
 		text: 'This is a condensed line.',
 	},
 	parameters: {
@@ -36,4 +42,5 @@ export const ContainerIs100px = {
 			template: '<div style="width: 100px;"><story/></div>',
 		}),
 	],
+	// @ts-expect-error text is for test
 } satisfies StoryObj<typeof MkCondensedLine>;

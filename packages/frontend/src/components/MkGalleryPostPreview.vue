@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <MkA :to="`/gallery/${post.id}`" class="ttasepnz _panel" tabindex="-1" @pointerenter="enterHover" @pointerleave="leaveHover">
 	<div class="thumbnail">
@@ -9,8 +14,8 @@
 					leaveActiveClass: $style.transition_toggle_leaveActive,
 					leaveToClass: $style.transition_toggle_leaveTo,
 				}"
-				:src="post.files[0].thumbnailUrl"
-				:hash="post.files[0].blurhash"
+				:src="post.files?.[0]?.thumbnailUrl"
+				:hash="post.files?.[0]?.blurhash"
 				:forceBlurhash="!show"
 			/>
 		</Transition>
@@ -27,13 +32,13 @@
 </template>
 
 <script lang="ts" setup>
-import * as misskey from 'misskey-js';
+import * as Misskey from 'misskey-js';
 import { computed, ref } from 'vue';
 import ImgWithBlurhash from '@/components/MkImgWithBlurhash.vue';
-import { defaultStore } from '@/store';
+import { defaultStore } from '@/store.js';
 
 const props = defineProps<{
-	post: misskey.entities.GalleryPost;
+	post: Misskey.entities.GalleryPost;
 }>();
 
 const hover = ref(false);

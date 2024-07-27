@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <script lang="ts">
 import { defineComponent, h, resolveDirective, withDirectives } from 'vue';
 
@@ -8,18 +13,18 @@ export default defineComponent({
 		},
 	},
 	setup(props, { emit, slots }) {
-		const options = slots.default();
+		const options = slots.default?.() ?? [];
 
 		return () => h('div', {
 			class: 'pxhvhrfw',
 		}, options.map(option => withDirectives(h('button', {
-			class: ['_button', { active: props.modelValue === option.props.value }],
-			key: option.key,
-			disabled: props.modelValue === option.props.value,
+			class: ['_button', { active: props.modelValue === option.props?.value }],
+			key: option.key as string,
+			disabled: props.modelValue === option.props?.value,
 			onClick: () => {
-				emit('update:modelValue', option.props.value);
+				emit('update:modelValue', option.props?.value);
 			},
-		}, option.children), [
+		}, option.children ?? []), [
 			[resolveDirective('click-anime')],
 		])));
 	},

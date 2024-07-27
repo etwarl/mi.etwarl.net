@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <span v-if="!fetching" :class="$style.root">
 	<template v-if="display === 'marquee'">
@@ -23,9 +28,10 @@
 
 <script lang="ts" setup>
 import { ref } from 'vue';
+import * as Misskey from 'misskey-js';
 import MarqueeText from '@/components/MkMarquee.vue';
-import { useInterval } from '@/scripts/use-interval';
-import { shuffle } from '@/scripts/shuffle';
+import { useInterval } from '@/scripts/use-interval.js';
+import { shuffle } from '@/scripts/shuffle.js';
 
 const props = defineProps<{
 	url?: string;
@@ -37,19 +43,19 @@ const props = defineProps<{
 	refreshIntervalSec?: number;
 }>();
 
-const items = ref([]);
+const items = ref<Misskey.entities.FetchRssResponse['items']>([]);
 const fetching = ref(true);
-let key = $ref(0);
+const key = ref(0);
 
 const tick = () => {
 	window.fetch(`/api/fetch-rss?url=${props.url}`, {}).then(res => {
-		res.json().then(feed => {
+		res.json().then((feed: Misskey.entities.FetchRssResponse) => {
 			if (props.shuffle) {
 				shuffle(feed.items);
 			}
 			items.value = feed.items;
 			fetching.value = false;
-			key++;
+			key.value++;
 		});
 	});
 };

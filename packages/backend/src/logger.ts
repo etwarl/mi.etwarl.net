@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import cluster from 'node:cluster';
 import chalk from 'chalk';
 import { default as convertColor } from 'color-convert';
@@ -13,6 +18,7 @@ type Context = {
 
 type Level = 'error' | 'success' | 'warning' | 'debug' | 'info';
 
+// eslint-disable-next-line import/no-default-export
 export default class Logger {
 	private context: Context;
 	private parentLogger: Logger | null = null;
@@ -65,8 +71,11 @@ export default class Logger {
 		let log = `${l} ${worker}\t[${contexts.join(' ')}]\t${m}`;
 		if (envOption.withLogTime) log = chalk.gray(time) + ' ' + log;
 
-		console.log(important ? chalk.bold(log) : log);
-		if (level === 'error' && data) console.log(data);
+		const args: unknown[] = [important ? chalk.bold(log) : log];
+		if (data != null) {
+			args.push(data);
+		}
+		console.log(...args);
 	}
 
 	@bindThis

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <div data-cy-mkw-onlineUsers :class="[$style.root, { _panel: !widgetProps.transparent, [$style.pad]: !widgetProps.transparent }]">
 	<span :class="$style.text">
@@ -10,12 +15,12 @@
 
 <script lang="ts" setup>
 import { ref } from 'vue';
-import { useWidgetPropsManager, Widget, WidgetComponentEmits, WidgetComponentExpose, WidgetComponentProps } from './widget';
-import { GetFormResultType } from '@/scripts/form';
-import * as os from '@/os';
-import { useInterval } from '@/scripts/use-interval';
-import { i18n } from '@/i18n';
-import number from '@/filters/number';
+import { useWidgetPropsManager, WidgetComponentEmits, WidgetComponentExpose, WidgetComponentProps } from './widget.js';
+import { GetFormResultType } from '@/scripts/form.js';
+import { misskeyApi, misskeyApiGet } from '@/scripts/misskey-api.js';
+import { useInterval } from '@/scripts/use-interval.js';
+import { i18n } from '@/i18n.js';
+import number from '@/filters/number.js';
 
 const name = 'onlineUsers';
 
@@ -40,7 +45,7 @@ const { widgetProps, configure } = useWidgetPropsManager(name,
 const onlineUsersCount = ref(0);
 
 const tick = () => {
-	os.apiGet('get-online-users-count').then(res => {
+	misskeyApiGet('get-online-users-count').then(res => {
 		onlineUsersCount.value = res.count;
 	});
 };

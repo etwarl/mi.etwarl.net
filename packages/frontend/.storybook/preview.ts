@@ -1,5 +1,10 @@
-import { addons } from '@storybook/addons';
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { FORCE_REMOUNT } from '@storybook/core-events';
+import { addons } from '@storybook/preview-api';
 import { type Preview, setup } from '@storybook/vue3';
 import isChromatic from 'chromatic/isChromatic';
 import { initialize, mswDecorator } from 'msw-storybook-addon';

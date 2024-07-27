@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 process.env.NODE_ENV = 'test';
 
 import { jest } from '@jest/globals';
@@ -10,7 +15,7 @@ import { CreateSystemUserService } from '@/core/CreateSystemUserService.js';
 import { UserEntityService } from '@/core/entities/UserEntityService.js';
 import { QueueService } from '@/core/QueueService.js';
 import { IdService } from '@/core/IdService.js';
-import type { RelaysRepository } from '@/models/index.js';
+import type { RelaysRepository } from '@/models/_.js';
 import { DI } from '@/di-symbols.js';
 import type { TestingModule } from '@nestjs/testing';
 import type { MockFunctionMetadata } from 'jest-mock';
@@ -85,7 +90,8 @@ describe('RelayService', () => {
 
 		expect(queueService.deliver).toHaveBeenCalled();
 		expect(queueService.deliver.mock.lastCall![1]?.type).toBe('Undo');
-		expect(queueService.deliver.mock.lastCall![1]?.object.type).toBe('Follow');
+		expect(typeof queueService.deliver.mock.lastCall![1]?.object).toBe('object');
+		expect((queueService.deliver.mock.lastCall![1]?.object as any).type).toBe('Follow');
 		expect(queueService.deliver.mock.lastCall![2]).toBe('https://example.com');
 		//expect(queueService.deliver.mock.lastCall![0].username).toBe('relay.actor');
 

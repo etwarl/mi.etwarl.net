@@ -2,16 +2,32 @@ import path from 'path';
 import pluginReplace from '@rollup/plugin-replace';
 import pluginVue from '@vitejs/plugin-vue';
 import { type UserConfig, defineConfig } from 'vite';
-// @ts-expect-error https://github.com/sxzz/unplugin-vue-macros/issues/257#issuecomment-1410752890
-import ReactivityTransform from '@vue-macros/reactivity-transform/vite';
 
-import locales from '../../locales';
-import generateDTS from '../../locales/generateDTS';
+import locales from '../../locales/index.js';
 import meta from '../../package.json';
-import pluginUnwindCssModuleClassName from './lib/rollup-plugin-unwind-css-module-class-name';
-import pluginJson5 from './vite.json5';
+import packageInfo from './package.json' assert { type: 'json' };
+import pluginUnwindCssModuleClassName from './lib/rollup-plugin-unwind-css-module-class-name.js';
+import pluginJson5 from './vite.json5.js';
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.json', '.json5', '.svg', '.sass', '.scss', '.css', '.vue'];
+
+/**
+ * Misskeyのフロントエンドにバンドルせず、CDNなどから別途読み込むリソースを記述する。
+ * CDNを使わずにバンドルしたい場合、以下の配列から該当要素を削除orコメントアウトすればOK
+ */
+const externalPackages = [
+	// shiki（コードブロックのシンタックスハイライトで使用中）はテーマ・言語の定義の容量が大きいため、それらはCDNから読み込む
+	{
+		name: 'shiki',
+		match: /^shiki\/(?<subPkg>(langs|themes))$/,
+		path(id: string, pattern: RegExp): string {
+			const match = pattern.exec(id)?.groups;
+			return match
+				? `https://esm.sh/shiki@${packageInfo.dependencies.shiki}/${match['subPkg']}`
+				: id;
+		},
+	},
+];
 
 const hash = (str: string, seed = 0): number => {
 	let h1 = 0xdeadbeef ^ seed,
@@ -29,6 +45,7 @@ const hash = (str: string, seed = 0): number => {
 };
 
 const BASE62_DIGITS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
 function toBase62(n: number): string {
 	if (n === 0) {
 		return '0';
@@ -51,10 +68,7 @@ export function getConfig(): UserConfig {
 		},
 
 		plugins: [
-			pluginVue({
-				reactivityTransform: true,
-			}),
-			ReactivityTransform(),
+			pluginVue(),
 			pluginUnwindCssModuleClassName(),
 			pluginJson5(),
 			...process.env.NODE_ENV === 'production'
@@ -67,10 +81,6 @@ export function getConfig(): UserConfig {
 					}),
 				]
 				: [],
-			{
-				name: 'locale:generateDTS',
-				buildStart: generateDTS,
-			},
 		],
 
 		resolve: {
@@ -110,15 +120,10 @@ export function getConfig(): UserConfig {
 			__VUE_PROD_DEVTOOLS__: false,
 		},
 
-		// https://vitejs.dev/guide/dep-pre-bundling.html#monorepos-and-linked-dependencies
-		optimizeDeps: {
-			include: ['misskey-js'],
-		},
-
 		build: {
 			target: [
-				'chrome108',
-				'firefox109',
+				'chrome116',
+				'firefox116',
 				'safari16',
 			],
 			manifest: 'manifest.json',
@@ -126,6 +131,7 @@ export function getConfig(): UserConfig {
 				input: {
 					app: './src/_boot_.ts',
 				},
+				external: externalPackages.map(p => p.match),
 				output: {
 					manualChunks: {
 						vue: ['vue'],
@@ -133,6 +139,15 @@ export function getConfig(): UserConfig {
 					},
 					chunkFileNames: process.env.NODE_ENV === 'production' ? '[hash:8].js' : '[name]-[hash:8].js',
 					assetFileNames: process.env.NODE_ENV === 'production' ? '[hash:8][extname]' : '[name]-[hash:8][extname]',
+					paths(id) {
+						for (const p of externalPackages) {
+							if (p.match.test(id)) {
+								return p.path(id, p.match);
+							}
+						}
+
+						return id;
+					},
 				},
 			},
 			cssCodeSplit: true,
@@ -144,7 +159,7 @@ export function getConfig(): UserConfig {
 
 			// https://vitejs.dev/guide/dep-pre-bundling.html#monorepos-and-linked-dependencies
 			commonjsOptions: {
-				include: [/misskey-js/, /node_modules/],
+				include: [/misskey-js/, /misskey-reversi/, /misskey-bubble-game/, /node_modules/],
 			},
 		},
 
@@ -155,11 +170,16 @@ export function getConfig(): UserConfig {
 		test: {
 			environment: 'happy-dom',
 			deps: {
-				inline: [
-					// XXX: misskey-dev/browser-image-resizer has no "type": "module"
-					'browser-image-resizer',
-				],
+				optimizer: {
+					web: {
+						include: [
+							// XXX: misskey-dev/browser-image-resizer has no "type": "module"
+							'browser-image-resizer',
+						],
+					},
+				},
 			},
+			includeSource: ['src/**/*.ts'],
 		},
 	};
 }

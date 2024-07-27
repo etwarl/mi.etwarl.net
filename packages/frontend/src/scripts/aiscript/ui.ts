@@ -1,6 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { utils, values } from '@syuilo/aiscript';
 import { v4 as uuid } from 'uuid';
 import { ref, Ref } from 'vue';
+import * as Misskey from 'misskey-js';
 
 export type AsUiComponentBase = {
 	id: string;
@@ -42,6 +48,7 @@ export type AsUiMfm = AsUiComponentBase & {
 	bold?: boolean;
 	color?: string;
 	font?: 'serif' | 'sans-serif' | 'monospace';
+	onClickEv?: (evId: string) => void
 };
 
 export type AsUiButton = AsUiComponentBase & {
@@ -109,17 +116,27 @@ export type AsUiFolder = AsUiComponentBase & {
 	opened?: boolean;
 };
 
+type PostFormPropsForAsUi = {
+	text: string;
+	cw?: string;
+	visibility?: (typeof Misskey.noteVisibilities)[number];
+	localOnly?: boolean;
+};
+
 export type AsUiPostFormButton = AsUiComponentBase & {
 	type: 'postFormButton';
 	text?: string;
 	primary?: boolean;
 	rounded?: boolean;
-	form?: {
-		text: string;
-	};
+	form?: PostFormPropsForAsUi;
 };
 
-export type AsUiComponent = AsUiRoot | AsUiContainer | AsUiText | AsUiMfm | AsUiButton | AsUiButtons | AsUiSwitch | AsUiTextarea | AsUiTextInput | AsUiNumberInput | AsUiSelect | AsUiFolder | AsUiPostFormButton;
+export type AsUiPostForm = AsUiComponentBase & {
+	type: 'postForm';
+	form?: PostFormPropsForAsUi;
+};
+
+export type AsUiComponent = AsUiRoot | AsUiContainer | AsUiText | AsUiMfm | AsUiButton | AsUiButtons | AsUiSwitch | AsUiTextarea | AsUiTextInput | AsUiNumberInput | AsUiSelect | AsUiFolder | AsUiPostFormButton | AsUiPostForm;
 
 export function patch(id: string, def: values.Value, call: (fn: values.VFn, args: values.Value[]) => Promise<values.Value>) {
 	// TODO
@@ -203,7 +220,7 @@ function getTextOptions(def: values.Value | undefined): Omit<AsUiText, 'id' | 't
 	};
 }
 
-function getMfmOptions(def: values.Value | undefined): Omit<AsUiMfm, 'id' | 'type'> {
+function getMfmOptions(def: values.Value | undefined, call: (fn: values.VFn, args: values.Value[]) => Promise<values.Value>): Omit<AsUiMfm, 'id' | 'type'> {
 	utils.assertObject(def);
 
 	const text = def.value.get('text');
@@ -216,6 +233,8 @@ function getMfmOptions(def: values.Value | undefined): Omit<AsUiMfm, 'id' | 'typ
 	if (color) utils.assertString(color);
 	const font = def.value.get('font');
 	if (font) utils.assertString(font);
+	const onClickEv = def.value.get('onClickEv');
+	if (onClickEv) utils.assertFunction(onClickEv);
 
 	return {
 		text: text?.value,
@@ -223,6 +242,9 @@ function getMfmOptions(def: values.Value | undefined): Omit<AsUiMfm, 'id' | 'typ
 		bold: bold?.value,
 		color: color?.value,
 		font: font?.value,
+		onClickEv: (evId: string) => {
+			if (onClickEv) call(onClickEv, [values.STR(evId)]);
+		},
 	};
 }
 
@@ -427,6 +449,24 @@ function getFolderOptions(def: values.Value | undefined): Omit<AsUiFolder, 'id' 
 	};
 }
 
+function getPostFormProps(form: values.VObj): PostFormPropsForAsUi {
+	const text = form.value.get('text');
+	utils.assertString(text);
+	const cw = form.value.get('cw');
+	if (cw) utils.assertString(cw);
+	const visibility = form.value.get('visibility');
+	if (visibility) utils.assertString(visibility);
+	const localOnly = form.value.get('localOnly');
+	if (localOnly) utils.assertBoolean(localOnly);
+
+	return {
+		text: text.value,
+		cw: cw?.value,
+		visibility: (visibility?.value && (Misskey.noteVisibilities as readonly string[]).includes(visibility.value)) ? visibility.value as typeof Misskey.noteVisibilities[number] : undefined,
+		localOnly: localOnly?.value,
+	};
+}
+
 function getPostFormButtonOptions(def: values.Value | undefined, call: (fn: values.VFn, args: values.Value[]) => Promise<values.Value>): Omit<AsUiPostFormButton, 'id' | 'type'> {
 	utils.assertObject(def);
 
@@ -439,19 +479,24 @@ function getPostFormButtonOptions(def: values.Value | undefined, call: (fn: valu
 	const form = def.value.get('form');
 	if (form) utils.assertObject(form);
 
-	const getForm = () => {
-		const text = form!.value.get('text');
-		utils.assertString(text);
-		return {
-			text: text.value,
-		};
-	};
-
 	return {
 		text: text?.value,
 		primary: primary?.value,
 		rounded: rounded?.value,
-		form: form ? getForm() : {
+		form: form ? getPostFormProps(form) : {
+			text: '',
+		},
+	};
+}
+
+function getPostFormOptions(def: values.Value | undefined, call: (fn: values.VFn, args: values.Value[]) => Promise<values.Value>): Omit<AsUiPostForm, 'id' | 'type'> {
+	utils.assertObject(def);
+
+	const form = def.value.get('form');
+	if (form) utils.assertObject(form);
+
+	return {
+		form: form ? getPostFormProps(form) : {
 			text: '',
 		},
 	};
@@ -518,51 +563,55 @@ export function registerAsUiLib(components: Ref<AsUiComponent>[], done: (root: R
 		}),
 
 		'Ui:C:container': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('container', def, id, getContainerOptions, opts.call);
+			return createComponentInstance('container', def, id, getContainerOptions, opts.topCall);
 		}),
 
 		'Ui:C:text': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('text', def, id, getTextOptions, opts.call);
+			return createComponentInstance('text', def, id, getTextOptions, opts.topCall);
 		}),
 
 		'Ui:C:mfm': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('mfm', def, id, getMfmOptions, opts.call);
+			return createComponentInstance('mfm', def, id, getMfmOptions, opts.topCall);
 		}),
 
 		'Ui:C:textarea': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('textarea', def, id, getTextareaOptions, opts.call);
+			return createComponentInstance('textarea', def, id, getTextareaOptions, opts.topCall);
 		}),
 
 		'Ui:C:textInput': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('textInput', def, id, getTextInputOptions, opts.call);
+			return createComponentInstance('textInput', def, id, getTextInputOptions, opts.topCall);
 		}),
 
 		'Ui:C:numberInput': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('numberInput', def, id, getNumberInputOptions, opts.call);
+			return createComponentInstance('numberInput', def, id, getNumberInputOptions, opts.topCall);
 		}),
 
 		'Ui:C:button': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('button', def, id, getButtonOptions, opts.call);
+			return createComponentInstance('button', def, id, getButtonOptions, opts.topCall);
 		}),
 
 		'Ui:C:buttons': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('buttons', def, id, getButtonsOptions, opts.call);
+			return createComponentInstance('buttons', def, id, getButtonsOptions, opts.topCall);
 		}),
 
 		'Ui:C:switch': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('switch', def, id, getSwitchOptions, opts.call);
+			return createComponentInstance('switch', def, id, getSwitchOptions, opts.topCall);
 		}),
 
 		'Ui:C:select': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('select', def, id, getSelectOptions, opts.call);
+			return createComponentInstance('select', def, id, getSelectOptions, opts.topCall);
 		}),
 
 		'Ui:C:folder': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('folder', def, id, getFolderOptions, opts.call);
+			return createComponentInstance('folder', def, id, getFolderOptions, opts.topCall);
 		}),
 
 		'Ui:C:postFormButton': values.FN_NATIVE(([def, id], opts) => {
-			return createComponentInstance('postFormButton', def, id, getPostFormButtonOptions, opts.call);
+			return createComponentInstance('postFormButton', def, id, getPostFormButtonOptions, opts.topCall);
+		}),
+
+		'Ui:C:postForm': values.FN_NATIVE(([def, id], opts) => {
+			return createComponentInstance('postForm', def, id, getPostFormOptions, opts.topCall);
 		}),
 	};
 }

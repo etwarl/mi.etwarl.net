@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <MkModalWindow
 	ref="dialog"
@@ -23,8 +28,8 @@ import { ref, shallowRef } from 'vue';
 import * as Misskey from 'misskey-js';
 import XDrive from '@/components/MkDrive.vue';
 import MkModalWindow from '@/components/MkModalWindow.vue';
-import number from '@/filters/number';
-import { i18n } from '@/i18n';
+import number from '@/filters/number.js';
+import { i18n } from '@/i18n.js';
 
 withDefaults(defineProps<{
 	type?: 'file' | 'folder';
@@ -34,13 +39,13 @@ withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
-	(ev: 'done', r?: Misskey.entities.DriveFile[]): void;
+	(ev: 'done', r?: Misskey.entities.DriveFile[] | Misskey.entities.DriveFolder[]): void;
 	(ev: 'closed'): void;
 }>();
 
 const dialog = shallowRef<InstanceType<typeof MkModalWindow>>();
 
-const selected = ref<Misskey.entities.DriveFile[]>([]);
+const selected = ref<Misskey.entities.DriveFile[] | Misskey.entities.DriveFolder[]>([]);
 
 function ok() {
 	emit('done', selected.value);
@@ -52,7 +57,7 @@ function cancel() {
 	dialog.value?.close();
 }
 
-function onChangeSelection(files: Misskey.entities.DriveFile[]) {
-	selected.value = files;
+function onChangeSelection(v: Misskey.entities.DriveFile[] | Misskey.entities.DriveFolder[]) {
+	selected.value = v;
 }
 </script>

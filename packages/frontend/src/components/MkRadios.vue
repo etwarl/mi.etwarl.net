@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <script lang="ts">
 import { VNode, defineComponent, h, ref, watch } from 'vue';
 import MkRadio from './MkRadio.vue';
@@ -12,6 +17,9 @@ export default defineComponent({
 		const value = ref(props.modelValue);
 		watch(value, () => {
 			context.emit('update:modelValue', value.value);
+		});
+		watch(() => props.modelValue, v => {
+			value.value = v;
 		});
 		if (!context.slots.default) return null;
 		let options = context.slots.default();
@@ -30,7 +38,7 @@ export default defineComponent({
 			h('div', {
 				class: 'body',
 			}, options.map(option => h(MkRadio, {
-				key: option.key,
+				key: option.key as string,
 				value: option.props?.value,
 				modelValue: value.value,
 				'onUpdate:modelValue': _v => value.value = _v,

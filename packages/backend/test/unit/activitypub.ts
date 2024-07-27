@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 process.env.NODE_ENV = 'test';
 
 import * as assert from 'assert';
@@ -8,16 +13,19 @@ import { ApImageService } from '@/core/activitypub/models/ApImageService.js';
 import { ApNoteService } from '@/core/activitypub/models/ApNoteService.js';
 import { ApPersonService } from '@/core/activitypub/models/ApPersonService.js';
 import { ApRendererService } from '@/core/activitypub/ApRendererService.js';
+import { JsonLdService } from '@/core/activitypub/JsonLdService.js';
+import { CONTEXT } from '@/core/activitypub/misc/contexts.js';
 import { GlobalModule } from '@/GlobalModule.js';
 import { CoreModule } from '@/core/CoreModule.js';
 import { FederatedInstanceService } from '@/core/FederatedInstanceService.js';
 import { LoggerService } from '@/core/LoggerService.js';
-import type { IActor, IApDocument, ICollection, IPost } from '@/core/activitypub/type.js';
-import { Meta, Note } from '@/models/index.js';
+import type { IActor, IApDocument, ICollection, IObject, IPost } from '@/core/activitypub/type.js';
+import { MiMeta, MiNote } from '@/models/_.js';
 import { secureRndstr } from '@/misc/secure-rndstr.js';
 import { DownloadService } from '@/core/DownloadService.js';
 import { MetaService } from '@/core/MetaService.js';
-import type { RemoteUser } from '@/models/entities/User.js';
+import type { MiRemoteUser } from '@/models/User.js';
+import { genAidx } from '@/misc/id/aidx.js';
 import { MockResolver } from '../misc/mock-resolver.js';
 
 const host = 'https://host1.test';
@@ -70,7 +78,7 @@ function createRandomFeaturedCollection(actor: NonTransientIActor, length: numbe
 async function createRandomRemoteUser(
 	resolver: MockResolver,
 	personService: ApPersonService,
-): Promise<RemoteUser> {
+): Promise<MiRemoteUser> {
 	const actor = createRandomActor();
 	resolver.register(actor.id, actor);
 
@@ -82,14 +90,21 @@ describe('ActivityPub', () => {
 	let noteService: ApNoteService;
 	let personService: ApPersonService;
 	let rendererService: ApRendererService;
+	let jsonLdService: JsonLdService;
 	let resolver: MockResolver;
 
 	const metaInitial = {
 		cacheRemoteFiles: true,
 		cacheRemoteSensitiveFiles: true,
+		enableFanoutTimeline: true,
+		enableFanoutTimelineDbFallback: true,
+		perUserHomeTimelineCacheMax: 100,
+		perLocalUserUserTimelineCacheMax: 100,
+		perRemoteUserUserTimelineCacheMax: 100,
 		blockedHosts: [] as string[],
 		sensitiveWords: [] as string[],
-	} as Meta;
+		prohibitedWords: [] as string[],
+	} as MiMeta;
 	let meta = metaInitial;
 
 	beforeAll(async () => {
@@ -104,7 +119,7 @@ describe('ActivityPub', () => {
 				},
 			})
 			.overrideProvider(MetaService).useValue({
-				async fetch(): Promise<Meta> {
+				async fetch(): Promise<MiMeta> {
 					return meta;
 				},
 			}).compile();
@@ -116,6 +131,7 @@ describe('ActivityPub', () => {
 		personService = app.get<ApPersonService>(ApPersonService);
 		rendererService = app.get<ApRendererService>(ApRendererService);
 		imageService = app.get<ApImageService>(ApImageService);
+		jsonLdService = app.get<JsonLdService>(JsonLdService);
 		resolver = new MockResolver(await app.resolve<LoggerService>(LoggerService));
 
 		// Prevent ApPersonService from fetching instance, as it causes Jest import-after-test error
@@ -191,10 +207,10 @@ describe('ActivityPub', () => {
 
 	describe('Renderer', () => {
 		test('Render an announce with visibility: followers', () => {
-			rendererService.renderAnnounce(null, {
-				createdAt: new Date(0),
+			rendererService.renderAnnounce('https://example.com/notes/00example', {
+				id: genAidx(Date.now()),
 				visibility: 'followers',
-			} as Note);
+			} as MiNote);
 		});
 	});
 
@@ -254,6 +270,21 @@ describe('ActivityPub', () => {
 			assert.strictEqual(note.text, 'test test foo');
 			assert.strictEqual(note.uri, actor2Note.id);
 		});
+
+		test('Fetch a note that is a featured note of the attributed actor', async () => {
+			const actor = createRandomActor();
+			actor.featured = `${actor.id}/collections/featured`;
+
+			const featured = createRandomFeaturedCollection(actor, 5);
+			const firstNote = (featured.items as NonTransientIPost[])[0];
+
+			resolver.register(actor.id, actor);
+			resolver.register(actor.featured, featured);
+			resolver.register(firstNote.id, firstNote);
+
+			const note = await noteService.createNote(firstNote.id as string, resolver);
+			assert.strictEqual(note?.uri, firstNote.id);
+		});
 	});
 
 	describe('Images', () => {
@@ -268,7 +299,7 @@ describe('ActivityPub', () => {
 				await createRandomRemoteUser(resolver, personService),
 				imageObject,
 			);
-			assert.ok(!driveFile.isLink);
+			assert.ok(driveFile && !driveFile.isLink);
 
 			const sensitiveImageObject: IApDocument = {
 				type: 'Document',
@@ -281,7 +312,7 @@ describe('ActivityPub', () => {
 				await createRandomRemoteUser(resolver, personService),
 				sensitiveImageObject,
 			);
-			assert.ok(!sensitiveDriveFile.isLink);
+			assert.ok(sensitiveDriveFile && !sensitiveDriveFile.isLink);
 		});
 
 		test('cacheRemoteFiles=false disables caching', async () => {
@@ -297,7 +328,7 @@ describe('ActivityPub', () => {
 				await createRandomRemoteUser(resolver, personService),
 				imageObject,
 			);
-			assert.ok(driveFile.isLink);
+			assert.ok(driveFile && driveFile.isLink);
 
 			const sensitiveImageObject: IApDocument = {
 				type: 'Document',
@@ -310,7 +341,7 @@ describe('ActivityPub', () => {
 				await createRandomRemoteUser(resolver, personService),
 				sensitiveImageObject,
 			);
-			assert.ok(sensitiveDriveFile.isLink);
+			assert.ok(sensitiveDriveFile && sensitiveDriveFile.isLink);
 		});
 
 		test('cacheRemoteSensitiveFiles=false only affects sensitive files', async () => {
@@ -326,7 +357,7 @@ describe('ActivityPub', () => {
 				await createRandomRemoteUser(resolver, personService),
 				imageObject,
 			);
-			assert.ok(!driveFile.isLink);
+			assert.ok(driveFile && !driveFile.isLink);
 
 			const sensitiveImageObject: IApDocument = {
 				type: 'Document',
@@ -339,7 +370,57 @@ describe('ActivityPub', () => {
 				await createRandomRemoteUser(resolver, personService),
 				sensitiveImageObject,
 			);
-			assert.ok(sensitiveDriveFile.isLink);
+			assert.ok(sensitiveDriveFile && sensitiveDriveFile.isLink);
+		});
+
+		test('Link is not an attachment files', async () => {
+			const linkObject: IObject = {
+				type: 'Link',
+				href: 'https://example.com/',
+			};
+			const driveFile = await imageService.createImage(
+				await createRandomRemoteUser(resolver, personService),
+				linkObject,
+			);
+			assert.strictEqual(driveFile, null);
+		});
+	});
+
+	describe('JSON-LD', () =>{
+		test('Compaction', async () => {
+			const jsonLd = jsonLdService.use();
+
+			const object = {
+				'@context': [
+					'https://www.w3.org/ns/activitystreams',
+					{
+						_misskey_quote: 'https://misskey-hub.net/ns#_misskey_quote',
+						unknown: 'https://example.org/ns#unknown',
+						undefined: null,
+					},
+				],
+				id: 'https://example.com/notes/42',
+				type: 'Note',
+				attributedTo: 'https://example.com/users/1',
+				to: ['https://www.w3.org/ns/activitystreams#Public'],
+				content: 'test test foo',
+				_misskey_quote: 'https://example.com/notes/1',
+				unknown: 'test test bar',
+				undefined: 'test test baz',
+			};
+			const compacted = await jsonLd.compact(object);
+
+			assert.deepStrictEqual(compacted, {
+				'@context': CONTEXT,
+				id: 'https://example.com/notes/42',
+				type: 'Note',
+				attributedTo: 'https://example.com/users/1',
+				to: 'as:Public',
+				content: 'test test foo',
+				_misskey_quote: 'https://example.com/notes/1',
+				'https://example.org/ns#unknown': 'test test bar',
+				// undefined: 'test test baz',
+			});
 		});
 	});
 });

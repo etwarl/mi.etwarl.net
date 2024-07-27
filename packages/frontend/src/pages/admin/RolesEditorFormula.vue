@@ -1,9 +1,20 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <div class="_gaps">
 	<div :class="$style.header">
 		<MkSelect v-model="type" :class="$style.typeSelect">
 			<option value="isLocal">{{ i18n.ts._role._condition.isLocal }}</option>
 			<option value="isRemote">{{ i18n.ts._role._condition.isRemote }}</option>
+			<option value="isSuspended">{{ i18n.ts._role._condition.isSuspended }}</option>
+			<option value="isLocked">{{ i18n.ts._role._condition.isLocked }}</option>
+			<option value="isBot">{{ i18n.ts._role._condition.isBot }}</option>
+			<option value="isCat">{{ i18n.ts._role._condition.isCat }}</option>
+			<option value="isExplorable">{{ i18n.ts._role._condition.isExplorable }}</option>
+			<option value="roleAssignedTo">{{ i18n.ts._role._condition.roleAssignedTo }}</option>
 			<option value="createdLessThan">{{ i18n.ts._role._condition.createdLessThan }}</option>
 			<option value="createdMoreThan">{{ i18n.ts._role._condition.createdMoreThan }}</option>
 			<option value="followersLessThanOrEq">{{ i18n.ts._role._condition.followersLessThanOrEq }}</option>
@@ -46,6 +57,10 @@
 
 	<MkInput v-else-if="['followersLessThanOrEq', 'followersMoreThanOrEq', 'followingLessThanOrEq', 'followingMoreThanOrEq', 'notesLessThanOrEq', 'notesMoreThanOrEq'].includes(type)" v-model="v.value" type="number">
 	</MkInput>
+
+	<MkSelect v-else-if="type === 'roleAssignedTo'" v-model="v.roleId">
+		<option v-for="role in roles.filter(r => r.target === 'manual')" :key="role.id" :value="role.id">{{ role.name }}</option>
+	</MkSelect>
 </div>
 </template>
 
@@ -55,8 +70,9 @@ import { v4 as uuid } from 'uuid';
 import MkInput from '@/components/MkInput.vue';
 import MkSelect from '@/components/MkSelect.vue';
 import MkButton from '@/components/MkButton.vue';
-import { i18n } from '@/i18n';
-import { deepClone } from '@/scripts/clone';
+import { i18n } from '@/i18n.js';
+import { deepClone } from '@/scripts/clone.js';
+import { rolesCache } from '@/cache.js';
 
 const Sortable = defineAsyncComponent(() => import('vuedraggable').then(x => x.default));
 
@@ -71,6 +87,8 @@ const props = defineProps<{
 }>();
 
 const v = ref(deepClone(props.modelValue));
+
+const roles = await rolesCache.fetch();
 
 watch(() => props.modelValue, () => {
 	if (JSON.stringify(props.modelValue) === JSON.stringify(v.value)) return;
@@ -87,6 +105,7 @@ const type = computed({
 		if (t === 'and') v.value.values = [];
 		if (t === 'or') v.value.values = [];
 		if (t === 'not') v.value.value = { id: uuid(), type: 'isRemote' };
+		if (t === 'roleAssignedTo') v.value.roleId = '';
 		if (t === 'createdLessThan') v.value.sec = 86400;
 		if (t === 'createdMoreThan') v.value.sec = 86400;
 		if (t === 'followersLessThanOrEq') v.value.value = 10;

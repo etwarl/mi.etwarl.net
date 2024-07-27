@@ -1,5 +1,10 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 import { defineAsyncComponent, Directive, ref } from 'vue';
-import { popup } from '@/os';
+import { popup } from '@/os.js';
 
 export class UserPreview {
 	private el;
@@ -94,7 +99,6 @@ export class UserPreview {
 		this.el.removeEventListener('mouseover', this.onMouseover);
 		this.el.removeEventListener('mouseleave', this.onMouseleave);
 		this.el.removeEventListener('click', this.onClick);
-		window.clearInterval(this.checkTimer);
 	}
 }
 

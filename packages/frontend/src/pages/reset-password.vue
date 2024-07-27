@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <MkStickyContainer>
 	<template #header><MkPageHeader :actions="headerActions" :tabs="headerTabs"/></template>
@@ -15,24 +20,24 @@
 </template>
 
 <script lang="ts" setup>
-import { defineAsyncComponent, onMounted } from 'vue';
+import { defineAsyncComponent, onMounted, ref, computed } from 'vue';
 import MkInput from '@/components/MkInput.vue';
 import MkButton from '@/components/MkButton.vue';
-import * as os from '@/os';
-import { i18n } from '@/i18n';
-import { mainRouter } from '@/router';
-import { definePageMetadata } from '@/scripts/page-metadata';
+import * as os from '@/os.js';
+import { i18n } from '@/i18n.js';
+import { definePageMetadata } from '@/scripts/page-metadata.js';
+import { mainRouter } from '@/router/main.js';
 
 const props = defineProps<{
 	token?: string;
 }>();
 
-let password = $ref('');
+const password = ref('');
 
 async function save() {
 	await os.apiWithDialog('reset-password', {
 		token: props.token,
-		password: password,
+		password: password.value,
 	});
 	mainRouter.push('/');
 }
@@ -44,12 +49,12 @@ onMounted(() => {
 	}
 });
 
-const headerActions = $computed(() => []);
+const headerActions = computed(() => []);
 
-const headerTabs = $computed(() => []);
+const headerTabs = computed(() => []);
 
-definePageMetadata({
+definePageMetadata(() => ({
 	title: i18n.ts.resetPassword,
 	icon: 'ti ti-lock',
-});
+}));
 </script>

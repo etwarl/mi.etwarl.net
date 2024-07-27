@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <MkModalWindow
 	ref="dialog"
@@ -6,7 +11,7 @@
 	:withOkButton="true"
 	:okButtonDisabled="false"
 	@ok="ok()"
-	@close="dialog.close()"
+	@close="dialog?.close()"
 	@closed="emit('closed')"
 >
 	<template #header>{{ i18n.ts.describeFile }}</template>
@@ -20,12 +25,12 @@
 </template>
 
 <script lang="ts" setup>
-import { } from 'vue';
+import { shallowRef, ref } from 'vue';
 import * as Misskey from 'misskey-js';
 import MkModalWindow from '@/components/MkModalWindow.vue';
 import MkTextarea from '@/components/MkTextarea.vue';
 import MkDriveFileThumbnail from '@/components/MkDriveFileThumbnail.vue';
-import { i18n } from '@/i18n';
+import { i18n } from '@/i18n.js';
 
 const props = defineProps<{
 	file: Misskey.entities.DriveFile;
@@ -37,12 +42,12 @@ const emit = defineEmits<{
 	(ev: 'closed'): void;
 }>();
 
-const dialog = $shallowRef<InstanceType<typeof MkModalWindow>>();
+const dialog = shallowRef<InstanceType<typeof MkModalWindow>>();
 
-let caption = $ref(props.default);
+const caption = ref(props.default);
 
 async function ok() {
-	emit('done', caption);
-	dialog.close();
+	emit('done', caption.value);
+	dialog.value?.close();
 }
 </script>

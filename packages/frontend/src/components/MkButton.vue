@@ -1,9 +1,16 @@
+<!--
+SPDX-FileCopyrightText: syuilo and misskey-project
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <template>
 <button
 	v-if="!link"
 	ref="el" class="_button"
 	:class="[$style.root, { [$style.inline]: inline, [$style.primary]: primary, [$style.gradate]: gradate, [$style.danger]: danger, [$style.rounded]: rounded, [$style.full]: full, [$style.small]: small, [$style.large]: large, [$style.transparent]: transparent, [$style.asLike]: asLike }]"
 	:type="type"
+	:name="name"
+	:value="value"
 	@click="emit('click', $event)"
 	@mousedown="onMousedown"
 >
@@ -15,7 +22,8 @@
 <MkA
 	v-else class="_button"
 	:class="[$style.root, { [$style.inline]: inline, [$style.primary]: primary, [$style.gradate]: gradate, [$style.danger]: danger, [$style.rounded]: rounded, [$style.full]: full, [$style.small]: small, [$style.large]: large, [$style.transparent]: transparent, [$style.asLike]: asLike }]"
-	:to="to"
+	:to="to ?? '#'"
+	:behavior="linkBehavior"
 	@mousedown="onMousedown"
 >
 	<div ref="ripples" :class="$style.ripples" :data-children-class="$style.ripple"></div>
@@ -26,7 +34,7 @@
 </template>
 
 <script lang="ts" setup>
-import { nextTick, onMounted } from 'vue';
+import { nextTick, onMounted, shallowRef } from 'vue';
 
 const props = defineProps<{
 	type?: 'button' | 'submit' | 'reset';
@@ -36,6 +44,7 @@ const props = defineProps<{
 	inline?: boolean;
 	link?: boolean;
 	to?: string;
+	linkBehavior?: null | 'window' | 'browser';
 	autofocus?: boolean;
 	wait?: boolean;
 	danger?: boolean;
@@ -44,19 +53,21 @@ const props = defineProps<{
 	large?: boolean;
 	transparent?: boolean;
 	asLike?: boolean;
+	name?: string;
+	value?: string;
 }>();
 
 const emit = defineEmits<{
 	(ev: 'click', payload: MouseEvent): void;
 }>();
 
-let el = $shallowRef<HTMLElement | null>(null);
-let ripples = $shallowRef<HTMLElement | null>(null);
+const el = shallowRef<HTMLElement | null>(null);
+const ripples = shallowRef<HTMLElement | null>(null);
 
 onMounted(() => {
 	if (props.autofocus) {
 		nextTick(() => {
-			el!.focus();
+			el.value!.focus();
 		});
 	}
 });
@@ -79,11 +90,11 @@ function onMousedown(evt: MouseEvent): void {
 	const rect = target.getBoundingClientRect();
 
 	const ripple = document.createElement('div');
-	ripple.classList.add(ripples!.dataset.childrenClass!);
+	ripple.classList.add(ripples.value!.dataset.childrenClass!);
 	ripple.style.top = (evt.clientY - rect.top - 1).toString() + 'px';
 	ripple.style.left = (evt.clientX - rect.left - 1).toString() + 'px';
 
-	ripples!.appendChild(ripple);
+	ripples.value!.appendChild(ripple);
 
 	const circleCenterX = evt.clientX - rect.left;
 	const circleCenterY = evt.clientY - rect.top;
@@ -98,7 +109,7 @@ function onMousedown(evt: MouseEvent): void {
 		ripple.style.opacity = '0';
 	}, 1000);
 	window.setTimeout(() => {
-		if (ripples) ripples.removeChild(ripple);
+		if (ripples.value) ripples.value.removeChild(ripple);
 	}, 2000);
 }
 </script>
@@ -121,6 +132,10 @@ function onMousedown(evt: MouseEvent): void {
 	overflow: clip;
 	box-sizing: border-box;
 	transition: background 0.1s ease;
+
+	&:hover {
+		text-decoration: none;
+	}
 
 	&:not(:disabled):hover {
 		background: var(--buttonHoverBg);

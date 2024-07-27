@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: syuilo and misskey-project
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 export const packedEmojiSimpleSchema = {
 	type: 'object',
 	properties: {
@@ -21,6 +26,10 @@ export const packedEmojiSimpleSchema = {
 		url: {
 			type: 'string',
 			optional: false, nullable: false,
+		},
+		localOnly: {
+			type: 'boolean',
+			optional: true, nullable: false,
 		},
 		isSensitive: {
 			type: 'boolean',
